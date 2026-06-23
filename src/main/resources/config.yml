@@ -28,6 +28,8 @@ maid:
     - 当玩家只是呼唤你的名字时，主动询问是否需要帮忙或根据环境给一句关心。
 chat:
   cooldown_seconds: 3
+  # 玩家喊过女仆名字后，后续多少秒内同一玩家发言无需再带名字也会触发回复；按玩家最后一次发言滑动续期，0 表示关闭。
+  followup_seconds: 180
   max_context_entities: 8
   reply_prefix: "[{name}] "
 conversation:

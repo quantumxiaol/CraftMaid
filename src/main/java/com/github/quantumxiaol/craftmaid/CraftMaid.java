@@ -13,6 +13,7 @@ public final class CraftMaid extends JavaPlugin {
     private String masterName;
     private String systemPrompt;
     private int chatCooldownSeconds;
+    private int chatFollowupSeconds;
     private int maxContextEntities;
     private int conversationSummaryMaxTokens;
     private double conversationSummaryTemperature;
@@ -70,6 +71,7 @@ public final class CraftMaid extends JavaPlugin {
         this.masterName = getConfigString("maid.master", "PlayerName");
         String language = getConfigString("maid.language", "中文");
         this.chatCooldownSeconds = Math.max(0, getConfig().getInt("chat.cooldown_seconds", 3));
+        this.chatFollowupSeconds = Math.max(0, getConfig().getInt("chat.followup_seconds", 180));
         this.maxContextEntities = Math.max(0, getConfig().getInt("chat.max_context_entities", 8));
         this.replyPrefix = getConfig().getString("chat.reply_prefix", "[{name}] ");
         boolean conversationEnabled = getConfig().getBoolean("conversation.enabled", true);
@@ -120,6 +122,10 @@ public final class CraftMaid extends JavaPlugin {
 
     public int getChatCooldownSeconds() {
         return chatCooldownSeconds;
+    }
+
+    public int getChatFollowupSeconds() {
+        return chatFollowupSeconds;
     }
 
     public int getMaxContextEntities() {

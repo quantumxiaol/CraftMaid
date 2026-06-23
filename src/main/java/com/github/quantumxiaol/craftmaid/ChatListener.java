@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 public class ChatListener implements Listener {
     private final CraftMaid plugin;
     private final Map<UUID, Long> nextAllowedReplyAt = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> conversationActiveUntil = new ConcurrentHashMap<>();
     private final Set<UUID> respondingPlayers = ConcurrentHashMap.newKeySet();
     private volatile LlmClient llmClient;
 
@@ -39,13 +40,18 @@ public class ChatListener implements Listener {
     @EventHandler
     public void onPlayerChat(AsyncChatEvent event) {
         Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
         String rawMessage = PlainTextComponentSerializer.plainText().serialize(event.message());
         
         String maidName = plugin.getMaidName();
+        boolean addressedByName = containsMaidName(rawMessage, maidName);
+        boolean inFollowupWindow = isConversationActive(playerId);
 
-        if (!containsMaidName(rawMessage, maidName)) {
+        if (!addressedByName && !inFollowupWindow) {
             return;
         }
+
+        refreshConversationWindow(playerId);
 
         LlmClient client = this.llmClient;
         if (client == null) {
@@ -53,10 +59,10 @@ public class ChatListener implements Listener {
             return;
         }
 
-        Bukkit.getScheduler().runTask(plugin, () -> handleMaidMention(player, rawMessage, maidName, client));
+        Bukkit.getScheduler().runTask(plugin, () -> handleMaidMention(player, rawMessage, maidName, addressedByName, client));
     }
 
-    private void handleMaidMention(Player player, String rawMessage, String maidName, LlmClient client) {
+    private void handleMaidMention(Player player, String rawMessage, String maidName, boolean addressedByName, LlmClient client) {
         if (!player.isOnline()) {
             return;
         }
@@ -95,7 +101,7 @@ public class ChatListener implements Listener {
         String identityStr = isMaster ? "主人" : "其他玩家";
         
         String systemPrompt = plugin.getSystemPrompt();
-        String playerSpeech = stripMaidName(rawMessage, maidName);
+        String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
         if (playerSpeech.isBlank()) {
             playerSpeech = "正在呼唤你，请自然回应。";
         }
@@ -165,6 +171,33 @@ public class ChatListener implements Listener {
 
             plugin.getConversationHistory().applyCompression(compressionRequest, memorySummary);
         });
+    }
+
+    private boolean isConversationActive(UUID playerId) {
+        int followupSeconds = plugin.getChatFollowupSeconds();
+        if (followupSeconds <= 0) {
+            return false;
+        }
+
+        Long activeUntil = conversationActiveUntil.get(playerId);
+        long now = System.currentTimeMillis();
+        if (activeUntil == null) {
+            return false;
+        }
+        if (activeUntil < now) {
+            conversationActiveUntil.remove(playerId, activeUntil);
+            return false;
+        }
+        return true;
+    }
+
+    private void refreshConversationWindow(UUID playerId) {
+        int followupSeconds = plugin.getChatFollowupSeconds();
+        if (followupSeconds <= 0) {
+            conversationActiveUntil.remove(playerId);
+            return;
+        }
+        conversationActiveUntil.put(playerId, System.currentTimeMillis() + followupSeconds * 1000L);
     }
 
     private boolean containsMaidName(String rawMessage, String maidName) {
