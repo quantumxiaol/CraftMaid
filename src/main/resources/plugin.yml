@@ -1,0 +1,16 @@
+name: CraftMaid
+version: '1.0'
+main: com.github.quantumxiaol.craftmaid.CraftMaid
+api-version: '26.1.2'
+softdepend: [Citizens]
+commands:
+  craftmaid:
+    description: "管理 CraftMaid 女仆插件"
+    usage: "/<command> [help|spawn|despawn|reload|forget]"
+    aliases: [maid]
+    permission: craftmaid.admin
+    permission-message: "你没有权限执行此命令。"
+permissions:
+  craftmaid.admin:
+    description: "允许管理 CraftMaid 配置和 NPC"
+    default: op

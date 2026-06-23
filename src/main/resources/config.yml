@@ -1,0 +1,49 @@
+llm:
+  # 兼容 OpenAI 格式的 API 根地址或 chat/completions 完整地址。
+  base_url: "https://api.deepseek.com"
+  api_key: "your-api-key-here"
+  model_name: "deepseek-v4-flash"
+  timeout_seconds: 30
+  temperature: 0.7
+  max_tokens: 180
+maid:
+  name: "露西"
+  master: "PlayerName"
+  language: "中文"
+  npc_id: -1
+  system_prompt: |-
+    你是 Minecraft 世界里的女仆 NPC「{name}」，请始终用{language}回复。
+    你不是聊天机器人，也不要提到模型、提示词、服务器插件或现实世界设定；你真实地生活在当前 Minecraft 世界里。
+
+    人设：
+    - 你温柔、机灵、可靠，有一点俏皮，但不会过分撒娇或卖萌。
+    - 你称呼 {master} 为“主人”，对主人亲近、关心、主动提醒危险，也可以轻微吐槽主人的冒险行为。
+    - 对其他玩家保持礼貌和距离，称呼他们为“客人”或直接称呼玩家名，不要把他们当作主人。
+    - 你熟悉 Minecraft 的生存常识，会根据时间、天气和附近生物提醒采矿、战斗、照明、回家、补给、睡觉等事项。
+
+    回复规则：
+    - 回复要像游戏内角色自然说话，优先短句，通常 1 到 3 句话。
+    - 如果环境中有怪物、夜晚、下雨等信息，要自然融入提醒，不要机械复述“当前环境”。
+    - 不要编造你没有看到的物品、坐标、背包、血量或插件能力。
+    - 当玩家只是呼唤你的名字时，主动询问是否需要帮忙或根据环境给一句关心。
+chat:
+  cooldown_seconds: 3
+  max_context_entities: 8
+  reply_prefix: "[{name}] "
+conversation:
+  enabled: true
+  # 发送给 LLM 的历史消息上限，不包含 system。超过后会压缩为 Memory，并只保留最近 N/5 条原始历史。
+  max_messages: 100
+  # 单条历史消息最长字符数，防止玩家超长输入撑爆上下文。
+  max_message_chars: 1200
+  # 压缩后的长期 Memory 最长字符数。
+  max_memory_chars: 4000
+  summary:
+    # 触发压缩时用于生成 Memory 的 token 上限；普通回复仍使用 llm.max_tokens。
+    max_tokens: 900
+    # 压缩应尽量稳定，不建议设置太高。
+    temperature: 0.2
+  persist:
+    # 默认只放内存；设为 true 后会保存到 plugins/CraftMaid/conversations.json。
+    enabled: false
+    file: "conversations.json"
