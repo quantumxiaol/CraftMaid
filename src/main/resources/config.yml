@@ -10,6 +10,8 @@ maid:
   name: "露西"
   master: "PlayerName"
   language: "中文"
+  # NPC 皮肤来源：master=使用 maid.master 的皮肤；player=使用触发操作的玩家皮肤；none/default=不主动设置；也可以直接填玩家名。
+  skin: "master"
   npc_id: -1
   system_prompt: |-
     你是 Minecraft 世界里的女仆 NPC「{name}」，请始终用{language}回复。

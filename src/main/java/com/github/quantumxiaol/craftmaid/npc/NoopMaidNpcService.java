@@ -29,6 +29,11 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean applyConfiguredSkin(Player fallbackPlayer) {
+    return false;
+  }
+
+  @Override
   public boolean setHomeAtMaidLocation(Player fallbackPlayer) {
     return false;
   }
@@ -60,6 +65,21 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean isFollowing() {
+    return false;
+  }
+
+  @Override
+  public boolean openInventory(Player player) {
+    return false;
+  }
+
+  @Override
+  public MaidEquipment getEquipment() {
+    return MaidEquipment.empty();
+  }
+
+  @Override
+  public boolean setEquipment(MaidEquipment equipment) {
     return false;
   }
 

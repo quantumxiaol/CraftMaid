@@ -111,6 +111,10 @@ public final class CraftMaid extends JavaPlugin {
     return config.maid().master();
   }
 
+  public String getMaidSkin() {
+    return config.maid().skin();
+  }
+
   public String getSystemPrompt() {
     return config.systemPrompt();
   }

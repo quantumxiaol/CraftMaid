@@ -10,6 +10,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -24,6 +25,7 @@ public final class MaidMenuService implements Listener {
   }
 
   public void openFor(Player player) {
+    plugin.getMaidNpcService().applyConfiguredSkin(player);
     MaidMenuHolder holder = new MaidMenuHolder();
     Inventory inventory =
         Bukkit.createInventory(holder, MENU_SIZE, Component.text(plugin.getMaidName() + "的菜单"));
@@ -57,6 +59,16 @@ public final class MaidMenuService implements Listener {
         "把女仆送回已记录的 home。");
     setActionItem(
         holder, inventory, 14, MaidMenuAction.LOOK_AT_PLAYER, Material.SPYGLASS, "看向我", "让女仆转向你。");
+    setActionItem(
+        holder, inventory, 15, MaidMenuAction.OPEN_INVENTORY, Material.CHEST, "打开背包", "打开女仆背包。");
+    setActionItem(
+        holder,
+        inventory,
+        16,
+        MaidMenuAction.OPEN_EQUIPMENT,
+        Material.ARMOR_STAND,
+        "配置装备",
+        "设置女仆手持物和护甲。");
     setActionItem(
         holder, inventory, 19, MaidMenuAction.FOLLOW_START, Material.LEAD, "跟随我", "让女仆跟随你。");
     setActionItem(
@@ -101,6 +113,11 @@ public final class MaidMenuService implements Listener {
   @EventHandler
   public void onInventoryClick(InventoryClickEvent event) {
     Inventory topInventory = event.getView().getTopInventory();
+    if (topInventory.getHolder() instanceof MaidEquipmentHolder) {
+      handleEquipmentClick(event, topInventory);
+      return;
+    }
+
     if (!(topInventory.getHolder() instanceof MaidMenuHolder holder)) {
       return;
     }
@@ -119,6 +136,22 @@ public final class MaidMenuService implements Listener {
     handleAction(player, action);
   }
 
+  @EventHandler
+  public void onInventoryClose(InventoryCloseEvent event) {
+    Inventory topInventory = event.getInventory();
+    if (!(topInventory.getHolder() instanceof MaidEquipmentHolder holder)
+        || !(event.getPlayer() instanceof Player player)) {
+      return;
+    }
+
+    boolean saved = plugin.getMaidNpcService().setEquipment(holder.readEquipment());
+    if (saved) {
+      player.sendMessage(Component.text(plugin.getMaidName() + " 的装备已保存。", NamedTextColor.GREEN));
+    } else {
+      player.sendMessage(Component.text("保存女仆装备失败，请确认 Citizens 是否正常加载。", NamedTextColor.RED));
+    }
+  }
+
   private void handleAction(Player player, MaidMenuAction action) {
     switch (action) {
       case STATUS -> sendStatus(player);
@@ -126,6 +159,8 @@ public final class MaidMenuService implements Listener {
       case SET_HOME -> setHome(player);
       case RETURN_HOME -> returnHome(player);
       case LOOK_AT_PLAYER -> lookAtPlayer(player);
+      case OPEN_INVENTORY -> openInventory(player);
+      case OPEN_EQUIPMENT -> openEquipment(player);
       case FOLLOW_START -> startFollowing(player);
       case FOLLOW_STOP -> stopFollowing(player);
       case GUARD_START -> startGuarding(player);
@@ -134,6 +169,18 @@ public final class MaidMenuService implements Listener {
       case FISHING_PLACEHOLDER ->
           player.sendMessage(Component.text("钓鱼功能还没有接入；后续会先接 Denizen 原型。", NamedTextColor.YELLOW));
       case CLOSE -> player.closeInventory();
+    }
+  }
+
+  private void handleEquipmentClick(InventoryClickEvent event, Inventory topInventory) {
+    if (event.isShiftClick()) {
+      event.setCancelled(true);
+      return;
+    }
+
+    if (topInventory.equals(event.getClickedInventory())
+        && !MaidEquipmentHolder.isEquipmentSlot(event.getSlot())) {
+      event.setCancelled(true);
     }
   }
 
@@ -221,6 +268,46 @@ public final class MaidMenuService implements Listener {
       return;
     }
     player.sendMessage(Component.text(plugin.getMaidName() + " 看向了你。", NamedTextColor.GREEN));
+  }
+
+  private void openInventory(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    player.closeInventory();
+    Bukkit.getScheduler()
+        .runTask(
+            plugin,
+            () -> {
+              boolean opened = plugin.getMaidNpcService().openInventory(player);
+              if (!opened) {
+                player.sendMessage(
+                    Component.text("打开女仆背包失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
+              }
+            });
+  }
+
+  private void openEquipment(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+
+    player.closeInventory();
+    Bukkit.getScheduler()
+        .runTask(
+            plugin,
+            () -> {
+              MaidEquipmentHolder holder = new MaidEquipmentHolder();
+              Inventory inventory =
+                  Bukkit.createInventory(
+                      holder,
+                      MaidEquipmentHolder.SIZE,
+                      Component.text(plugin.getMaidName() + "的装备"));
+              holder.setInventory(inventory);
+              holder.populate(plugin.getMaidNpcService().getEquipment());
+              player.openInventory(inventory);
+              player.sendMessage(Component.text("把装备放入对应槽位，关闭窗口后保存。", NamedTextColor.GRAY));
+            });
   }
 
   private void startFollowing(Player player) {

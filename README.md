@@ -66,6 +66,7 @@ maid:
   name: "露西" # 女仆在游戏内的名字
   master: "PlayerName" # 你的游戏 ID，女仆会对该玩家展现主人的态度
   language: "中文"
+  skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
   system_prompt: |-
     这里可以自定义女仆的人设、称呼习惯、说话风格和行为边界。
     可用占位符：{name}、{master}、{language}。占位符是可选的，完全重写后不包含占位符也可以。
@@ -110,7 +111,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果你的服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
+如果你的服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -119,7 +120,7 @@ conversation:
 ```
 会在你当前的位置生成一个拥有配置文件中名字的肉身女仆 NPC。再次执行会把已记录的女仆移动到当前位置，不会重复堆出多个 NPC。
 
-当前插件只创建 `EntityType.PLAYER` 类型 NPC，并把显示名设置为 `maid.name`；没有内置或强制设置女仆皮肤。NPC 外观由 Citizens 对该 NPC 名称的默认皮肤处理决定。需要固定女仆皮肤时，可以先用 Citizens 自带命令给 NPC 设置 skin，后续版本也可以把 skin 名称/URL 做成 `config.yml` 配置项。
+当前插件创建 `EntityType.PLAYER` 类型 NPC，并把显示名设置为 `maid.name`。默认 `maid.skin: "master"` 会尝试使用 `maid.master` 对应玩家的皮肤；也可以把 `maid.skin` 改成任意玩家名，或设为 `none` / `default` 让 Citizens 自己处理外观。
 
 右键已生成的女仆 NPC 会打开 CraftMaid 菜单。当前菜单已支持：
 
@@ -128,11 +129,13 @@ conversation:
 * 设置 home
 * 回家
 * 看向我
+* 打开背包
+* 配置装备
 * 跟随我 / 别跟了
 * 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
 * 关闭菜单
 
-“去钓鱼”目前仍是占位提示，后续会接 Denizen 原型或 CraftMaid job。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
+“打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼”目前仍是占位提示，后续会接 Denizen 原型或 CraftMaid job。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
 
 移除已记录的女仆 NPC：
 ```

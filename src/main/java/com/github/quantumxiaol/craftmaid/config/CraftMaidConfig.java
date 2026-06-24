@@ -32,7 +32,8 @@ public record CraftMaidConfig(
         new MaidSettings(
             getConfigString(plugin, "maid.name", "露西"),
             getConfigString(plugin, "maid.master", "PlayerName"),
-            getConfigString(plugin, "maid.language", "中文"));
+            getConfigString(plugin, "maid.language", "中文"),
+            getConfigString(plugin, "maid.skin", "master"));
 
     ChatSettings chat =
         new ChatSettings(
@@ -90,7 +91,7 @@ public record CraftMaidConfig(
       int maxTokens,
       int timeoutSeconds) {}
 
-  public record MaidSettings(String name, String master, String language) {}
+  public record MaidSettings(String name, String master, String language, String skin) {}
 
   public record ChatSettings(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}

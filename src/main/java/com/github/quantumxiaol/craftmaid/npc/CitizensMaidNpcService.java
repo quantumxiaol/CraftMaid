@@ -6,15 +6,21 @@ import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.Trait;
+import net.citizensnpcs.api.trait.trait.Equipment;
+import net.citizensnpcs.api.trait.trait.Equipment.EquipmentSlot;
+import net.citizensnpcs.api.trait.trait.Inventory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 public final class CitizensMaidNpcService implements MaidNpcService {
+  private static final String CITIZENS_PLUGIN = "Citizens";
+  private static final String SKIN_TRAIT_CLASS = "net.citizensnpcs.trait.SkinTrait";
   private static final String SENTINEL_PLUGIN = "Sentinel";
   private static final String SENTINEL_TRAIT_CLASS = "org.mcmonkey.sentinel.SentinelTrait";
 
@@ -52,6 +58,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       plugin.saveConfig();
     }
 
+    applyConfiguredSkin(npc, player);
     if (npc.isSpawned()) {
       npc.despawn();
     }
@@ -74,6 +81,15 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     plugin.getConfig().set("maid.npc_id", -1);
     plugin.saveConfig();
     return true;
+  }
+
+  @Override
+  public boolean applyConfiguredSkin(Player fallbackPlayer) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+    return applyConfiguredSkin(npc, fallbackPlayer);
   }
 
   @Override
@@ -119,6 +135,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       plugin.saveConfig();
     }
 
+    applyConfiguredSkin(npc, null);
     stopFollowing();
     if (npc.isSpawned()) {
       npc.teleport(home, PlayerTeleportEvent.TeleportCause.PLUGIN);
@@ -154,6 +171,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       npc.spawn(player.getLocation());
     }
 
+    applyConfiguredSkin(npc, player);
     stopFollowing();
     NPC followNpc = npc;
     followNpc.getNavigator().setTarget(player, false);
@@ -193,13 +211,58 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean openInventory(Player player) {
+    NPC npc = ensureSpawnedNear(player);
+    if (npc == null) {
+      return false;
+    }
+
+    npc.getOrAddTrait(Inventory.class).openInventory(player);
+    return true;
+  }
+
+  @Override
+  public MaidEquipment getEquipment() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return MaidEquipment.empty();
+    }
+
+    Equipment equipment = npc.getOrAddTrait(Equipment.class);
+    return new MaidEquipment(
+        equipment.get(EquipmentSlot.HAND),
+        equipment.get(EquipmentSlot.OFF_HAND),
+        equipment.get(EquipmentSlot.HELMET),
+        equipment.get(EquipmentSlot.CHESTPLATE),
+        equipment.get(EquipmentSlot.LEGGINGS),
+        equipment.get(EquipmentSlot.BOOTS));
+  }
+
+  @Override
+  public boolean setEquipment(MaidEquipment equipment) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    Equipment npcEquipment = npc.getOrAddTrait(Equipment.class);
+    npcEquipment.set(EquipmentSlot.HAND, MaidEquipment.copyOrNull(equipment.mainHand()));
+    npcEquipment.set(EquipmentSlot.OFF_HAND, MaidEquipment.copyOrNull(equipment.offHand()));
+    npcEquipment.set(EquipmentSlot.HELMET, MaidEquipment.copyOrNull(equipment.helmet()));
+    npcEquipment.set(EquipmentSlot.CHESTPLATE, MaidEquipment.copyOrNull(equipment.chestplate()));
+    npcEquipment.set(EquipmentSlot.LEGGINGS, MaidEquipment.copyOrNull(equipment.leggings()));
+    npcEquipment.set(EquipmentSlot.BOOTS, MaidEquipment.copyOrNull(equipment.boots()));
+    return true;
+  }
+
+  @Override
   public boolean isGuardAvailable() {
     if (!plugin.getServer().getPluginManager().isPluginEnabled(SENTINEL_PLUGIN)) {
       return false;
     }
 
     try {
-      Class.forName(SENTINEL_TRAIT_CLASS);
+      loadClassFromPlugin(SENTINEL_PLUGIN, SENTINEL_TRAIT_CLASS);
       return true;
     } catch (ClassNotFoundException | LinkageError ex) {
       return false;
@@ -272,6 +335,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc != null && !npc.isSpawned()) {
       npc.spawn(player.getLocation());
     }
+    if (npc != null) {
+      applyConfiguredSkin(npc, player);
+    }
     return npc;
   }
 
@@ -281,6 +347,41 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return null;
     }
     return CitizensAPI.getNPCRegistry().getById(npcId);
+  }
+
+  private boolean applyConfiguredSkin(NPC npc, Player fallbackPlayer) {
+    String skinName = resolveSkinName(fallbackPlayer);
+    if (skinName == null || skinName.isBlank()) {
+      return false;
+    }
+
+    try {
+      Object trait = getTraitFromPlugin(npc, CITIZENS_PLUGIN, SKIN_TRAIT_CLASS);
+      optionalInvoke(trait, "setShouldUpdateSkins", new Class<?>[] {boolean.class}, true);
+      try {
+        invoke(trait, "setSkinName", new Class<?>[] {String.class, boolean.class}, skinName, true);
+      } catch (NoSuchMethodException ex) {
+        invoke(trait, "setSkinName", new Class<?>[] {String.class}, skinName);
+      }
+      return true;
+    } catch (ReflectiveOperationException | LinkageError ex) {
+      plugin.getLogger().warning("设置 Citizens 皮肤失败: " + rootMessage(ex));
+      return false;
+    }
+  }
+
+  private String resolveSkinName(Player fallbackPlayer) {
+    String skin = plugin.getMaidSkin();
+    if (skin.equalsIgnoreCase("none") || skin.equalsIgnoreCase("default")) {
+      return null;
+    }
+    if (skin.equalsIgnoreCase("master")) {
+      return plugin.getMasterName();
+    }
+    if (skin.equalsIgnoreCase("player")) {
+      return fallbackPlayer == null ? plugin.getMasterName() : fallbackPlayer.getName();
+    }
+    return skin;
   }
 
   private void saveHomeLocation(Location home) {
@@ -296,9 +397,23 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private Object getSentinelTrait(NPC npc) throws ClassNotFoundException {
-    Class<?> rawTraitClass = Class.forName(SENTINEL_TRAIT_CLASS);
+    return getTraitFromPlugin(npc, SENTINEL_PLUGIN, SENTINEL_TRAIT_CLASS);
+  }
+
+  private Object getTraitFromPlugin(NPC npc, String pluginName, String className)
+      throws ClassNotFoundException {
+    Class<?> rawTraitClass = loadClassFromPlugin(pluginName, className);
     Class<? extends Trait> traitClass = rawTraitClass.asSubclass(Trait.class);
     return npc.getOrAddTrait(traitClass);
+  }
+
+  private Class<?> loadClassFromPlugin(String pluginName, String className)
+      throws ClassNotFoundException {
+    Plugin dependency = plugin.getServer().getPluginManager().getPlugin(pluginName);
+    if (dependency == null) {
+      return Class.forName(className);
+    }
+    return Class.forName(className, true, dependency.getClass().getClassLoader());
   }
 
   private void configureSentinelCombat(Object trait) throws ReflectiveOperationException {
@@ -312,6 +427,16 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private void invoke(Object target, String methodName, Class<?>[] parameterTypes, Object... args)
       throws ReflectiveOperationException {
     target.getClass().getMethod(methodName, parameterTypes).invoke(target, args);
+  }
+
+  private void optionalInvoke(
+      Object target, String methodName, Class<?>[] parameterTypes, Object... args)
+      throws ReflectiveOperationException {
+    try {
+      invoke(target, methodName, parameterTypes, args);
+    } catch (NoSuchMethodException ignored) {
+      // Older Citizens builds do not expose every SkinTrait helper; setSkinName is enough.
+    }
   }
 
   private void setField(Object target, String fieldName, Object value)

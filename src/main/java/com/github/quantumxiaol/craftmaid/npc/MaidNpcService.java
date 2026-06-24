@@ -15,6 +15,8 @@ public interface MaidNpcService {
 
   boolean despawnStored();
 
+  boolean applyConfiguredSkin(Player fallbackPlayer);
+
   boolean setHomeAtMaidLocation(Player fallbackPlayer);
 
   Location getHomeLocation();
@@ -28,6 +30,12 @@ public interface MaidNpcService {
   boolean stopFollowing();
 
   boolean isFollowing();
+
+  boolean openInventory(Player player);
+
+  MaidEquipment getEquipment();
+
+  boolean setEquipment(MaidEquipment equipment);
 
   boolean isGuardAvailable();
 
