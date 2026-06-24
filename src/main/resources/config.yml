@@ -15,7 +15,7 @@ maid:
   combat:
     # Sentinel 默认会阻止 NPC 击杀敌怪掉落物；这里开启后，护卫初始化时会允许敌怪正常掉落。
     enemy_drops: true
-    # NPC 击杀不一定被服务端当成玩家击杀；死亡经验为 0 时给敌怪补一个基础经验值。
+    # NPC 击杀不一定被服务端当成玩家击杀；死亡经验为 0 且插件能识别最后一击来源时，尝试补一个基础经验值。
     enemy_exp: true
     default_enemy_exp: 5
   npc_id: -1

@@ -1,14 +1,34 @@
-# 🎀 CraftMaid (环境感知型 AI 女仆)
+# CraftMaid
 
-CraftMaid 是一款为 Minecraft (Paper/Spigot) 设计的轻量级 AI 陪伴插件。
-它通过生成一个具有**游戏环境感知能力**的 NPC，结合本地大语言模型（如 Qwen），为玩家提供沉浸式的陪伴体验。
+CraftMaid 分成两层能力。
 
-## ✨ 核心特性
+第一层是轻量的服务器 AI 对话插件：只要配置一个兼容 OpenAI 的 LLM 接口，玩家就可以在公屏和女仆对话。它会带上游戏环境上下文、多轮记忆和主人/客人身份，不强制要求安装 NPC 插件。
 
-* **零冗余依赖**：纯 Java 编写，利用自带的 HttpClient 与服务端底层 Gson。
-* **环境态势感知**：不仅能聊天，还能感知游戏内的时间、天气以及周围的实体与怪物。
-* **身份级联控制**：基于配置文件设定“主人”身份，AI 将根据对话者的身份切换不同的语气与态度。
-* **极简部署**：直接在 `config.yml` 中配置兼容 OpenAI 格式的 LLM API 即可运行。
+第二层是可选的实体女仆：安装 Citizens 后可以生成女仆 NPC，右键打开菜单；再安装 Sentinel 后可以让 NPC 跟随、护卫、战斗和守点。后续的工作能力会继续沿着 NPC 行为服务扩展。
+
+当前版本仍然不是完整 Minecraft Agent：LLM 只负责聊天回复，不会直接执行工具调用；钓鱼、农田、箱子整理、红石机器监控和区块加载还没有实现。
+
+## 当前能力
+
+* **AI 对话**：玩家在公屏提到女仆名字后触发回复；喊过一次名字后，默认 180 秒内同一玩家可以继续免唤醒对话。
+* **环境上下文**：对话时会采集玩家周围的时间、天气、附近实体和怪物等信息写入提示词。
+* **多轮记忆**：按玩家 UUID 管理历史；超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
+* **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
+* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、跟随和护卫控制。
+* **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
+* **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
+* **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标。
+* **Sentinel 护卫原型**：可通过菜单让女仆保护主人、停止护卫或守在当前位置；底层通过反射接 Sentinel trait，目标为怪物并避开 creeper。
+* **战斗掉落/经验处理**：护卫初始化时会打开 Sentinel 的敌怪掉落；默认开启 NPC 击杀经验补偿，但它依赖插件识别最后一击来源，不等同于原版玩家击杀。
+
+## 尚未实现
+
+* **Denizen 行为**：`plugin.yml` 已经 `softdepend` Denizen，但当前没有真正调用 Denizen API 或脚本。
+* **自动钓鱼**：菜单入口已预留，底层还没有接 Denizen `/npc fish`，也没有 CraftMaid 自己的钓鱼产出模拟。
+* **家务系统**：还没有箱子整理、成熟农作物收割补种、鱼塘、红石机器巡检或区块加载。
+* **Anchor/Job 框架**：当前只有 `maid.home.*`，足够支撑回家；还没有统一管理 `home`、`chest`、`farm`、`pond`、`redstone` 等锚点，也没有任务状态、中断规则或任务队列。
+* **自然语言动作执行**：LLM 目前只输出聊天文本；“露西，跟着我”还不会自动转换成 `FOLLOW_START`。
+* **跟随细节**：当前是第一版，还没有 `follow_distance`、`start_distance`、`teleport_distance`、跨世界处理、卡住恢复或重载后继续跟随。
 
 ## 📦 前置要求
 
@@ -45,8 +65,8 @@ mvn clean package
 
 发布新版本：
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 
@@ -69,7 +89,7 @@ maid:
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
   combat:
     enemy_drops: true # Sentinel 护卫击杀敌怪时允许掉落物
-    enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时补基础经验
+    enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时尝试补基础经验
     default_enemy_exp: 5
   system_prompt: |-
     这里可以自定义女仆的人设、称呼习惯、说话风格和行为边界。
@@ -137,11 +157,12 @@ conversation:
 * 配置装备
 * 跟随我 / 别跟了
 * 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
+* 去钓鱼（占位，尚未实现）
 * 关闭菜单
 
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼”目前仍是占位提示，后续会接 Denizen 原型或 CraftMaid job。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
 
-护卫战斗里，`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落；`maid.combat.enemy_exp: true` 会在女仆击杀敌怪但服务端给出 0 经验时补 `default_enemy_exp` 点经验。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
+护卫战斗里，`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
 
 移除已记录的女仆 NPC：
 ```
