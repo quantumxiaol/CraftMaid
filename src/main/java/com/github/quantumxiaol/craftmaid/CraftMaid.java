@@ -5,6 +5,7 @@ import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
+import com.github.quantumxiaol.craftmaid.npc.MaidNpcServices;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -19,13 +20,12 @@ public final class CraftMaid extends JavaPlugin {
   public void onEnable() {
     getLogger().info("🎀 CraftMaid 正在唤醒女仆...");
 
-    if (!getServer().getPluginManager().isPluginEnabled("Citizens")) {
-      getLogger().warning("找不到 Citizens 插件！(实体功能受限，但不影响聊天测试)");
-    }
-
     saveDefaultConfig();
     conversationHistory = new ConversationHistory(this);
-    maidNpcService = new MaidNpcService(this);
+    maidNpcService = MaidNpcServices.create(this);
+    if (!maidNpcService.isAvailable()) {
+      getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
+    }
     loadConfiguration();
 
     chatListener = new ChatListener(this, llmClient);

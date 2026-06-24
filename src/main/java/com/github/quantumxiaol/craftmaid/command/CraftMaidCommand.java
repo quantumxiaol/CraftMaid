@@ -89,7 +89,7 @@ public class CraftMaidCommand implements TabExecutor {
       return;
     }
 
-    if (!maidNpcService.isCitizensEnabled()) {
+    if (!maidNpcService.isAvailable()) {
       sender.sendMessage(Component.text("未安装或未启用 Citizens，无法召唤实体女仆。", NamedTextColor.RED));
       return;
     }
@@ -101,7 +101,7 @@ public class CraftMaidCommand implements TabExecutor {
   }
 
   private void despawnMaid(CommandSender sender) {
-    if (!maidNpcService.isCitizensEnabled()) {
+    if (!maidNpcService.isAvailable()) {
       sender.sendMessage(Component.text("未安装或未启用 Citizens，无法管理实体女仆。", NamedTextColor.RED));
       return;
     }
