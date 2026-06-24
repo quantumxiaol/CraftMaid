@@ -4,6 +4,7 @@ import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
+import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcServices;
 import org.bukkit.command.PluginCommand;
@@ -15,6 +16,7 @@ public final class CraftMaid extends JavaPlugin {
   private ChatListener chatListener;
   private ConversationHistory conversationHistory;
   private MaidNpcService maidNpcService;
+  private MaidMenuService maidMenuService;
 
   @Override
   public void onEnable() {
@@ -23,6 +25,7 @@ public final class CraftMaid extends JavaPlugin {
     saveDefaultConfig();
     conversationHistory = new ConversationHistory(this);
     maidNpcService = MaidNpcServices.create(this);
+    maidMenuService = new MaidMenuService(this);
     if (!maidNpcService.isAvailable()) {
       getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
     }
@@ -30,6 +33,8 @@ public final class CraftMaid extends JavaPlugin {
 
     chatListener = new ChatListener(this, llmClient);
     getServer().getPluginManager().registerEvents(chatListener, this);
+    getServer().getPluginManager().registerEvents(maidMenuService, this);
+    maidNpcService.registerInteractionListener(maidMenuService);
 
     PluginCommand craftMaidCommand = getCommand("craftmaid");
     if (craftMaidCommand == null) {

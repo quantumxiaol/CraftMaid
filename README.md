@@ -121,6 +121,14 @@ conversation:
 
 当前插件只创建 `EntityType.PLAYER` 类型 NPC，并把显示名设置为 `maid.name`；没有内置或强制设置女仆皮肤。NPC 外观由 Citizens 对该 NPC 名称的默认皮肤处理决定。需要固定女仆皮肤时，可以先用 Citizens 自带命令给 NPC 设置 skin，后续版本也可以把 skin 名称/URL 做成 `config.yml` 配置项。
 
+右键已生成的女仆 NPC 会打开 CraftMaid 菜单。当前菜单已支持：
+
+* 查看状态
+* 召回到身边
+* 关闭菜单
+
+菜单里也预留了“跟随我 / 保护我 / 去钓鱼”按钮；这些目前只是占位提示，后续会分别接 Citizens Navigator、Sentinel、Denizen 或 CraftMaid job。
+
 移除已记录的女仆 NPC：
 ```
 /craftmaid despawn

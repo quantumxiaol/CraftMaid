@@ -1,6 +1,8 @@
 package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
+import com.github.quantumxiaol.craftmaid.interaction.CitizensMaidInteractionListener;
+import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.entity.EntityType;
@@ -16,6 +18,19 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   @Override
   public boolean isAvailable() {
     return true;
+  }
+
+  @Override
+  public boolean isMaidNpc(int npcId) {
+    return plugin.getConfig().getInt("maid.npc_id", -1) == npcId;
+  }
+
+  @Override
+  public void registerInteractionListener(MaidMenuService menuService) {
+    plugin
+        .getServer()
+        .getPluginManager()
+        .registerEvents(new CitizensMaidInteractionListener(plugin, this, menuService), plugin);
   }
 
   @Override
