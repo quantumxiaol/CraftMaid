@@ -43,16 +43,57 @@ CraftMaid 分成两层能力。
   * Denizen 当前仍未接入；“去钓鱼”等按钮只是为后续扩展预留。
 * **AI 算力**：兼容 OpenAI API 格式的 LLM 服务接口 (如本地部署的 vLLM、Ollama 或云端 API)
 
-## 🛠️ 编译与构建
+## 🛠️ 安装、编译与构建
 
-本项目使用 Maven 进行包管理。
-当前构建目标为 Paper API `26.1.2.build.72-stable` 与 Java 25。
+### 直接安装 Release
+
+推荐从 GitHub Release 下载最新 jar：
+
+<https://github.com/quantumxiaol/CraftMaid/releases/latest>
+
+下载后把 jar 放入服务端的 `plugins` 文件夹，然后重启服务器。下面的命令应在服务端目录执行。
+
+当前版本也可以直接下载：
+
+```bash
+mkdir -p plugins
+curl -fL -o plugins/CraftMaid-v1.1.0.jar \
+  https://github.com/quantumxiaol/CraftMaid/releases/download/v1.1.0/CraftMaid-v1.1.0.jar
+```
+
+以后换版本时只改 `VERSION`：
+
+```bash
+VERSION=v1.1.0
+mkdir -p plugins
+curl -fL -o "plugins/CraftMaid-${VERSION}.jar" \
+  "https://github.com/quantumxiaol/CraftMaid/releases/download/${VERSION}/CraftMaid-${VERSION}.jar"
+```
+
+也可以自动获取最新版本号：
+
+```bash
+mkdir -p plugins
+VERSION="$(curl -fsSL https://api.github.com/repos/quantumxiaol/CraftMaid/releases/latest \
+  | sed -n 's/.*"tag_name": "\(v[^"]*\)".*/\1/p')"
+curl -fL -o "plugins/CraftMaid-${VERSION}.jar" \
+  "https://github.com/quantumxiaol/CraftMaid/releases/download/${VERSION}/CraftMaid-${VERSION}.jar"
+```
+
+如果你希望每次覆盖同一个插件文件名，也可以把 `-o` 改成 `plugins/CraftMaid.jar`；Minecraft/Paper 加载插件不要求 jar 文件名带版本号。
+
+Release 页面里的 `Source code (zip)` 和 `Source code (tar.gz)` 是源码包，不是服务端要安装的插件 jar。
+
+### 从源码编译
+
+本项目使用 Maven 进行包管理。当前构建目标为 Paper API `26.1.2.build.72-stable` 与 Java 25。
 
 ```bash
 git clone https://github.com/quantumxiaol/CraftMaid.git
 cd CraftMaid
 mvn clean package
 ```
+
 编译完成后，将 `target/CraftMaid-1.0-SNAPSHOT.jar` 放入服务端的 `plugins` 文件夹下。
 提交代码前可以运行 `mvn spotless:apply` 自动整理 Java 格式；CI 会执行 `mvn -B spotless:check` 和 `mvn -B clean package`。
 
