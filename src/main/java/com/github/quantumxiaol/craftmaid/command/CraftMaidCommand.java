@@ -17,7 +17,8 @@ import org.jetbrains.annotations.Nullable;
 
 public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
-      List.of("help", "spawn", "despawn", "reload", "forget");
+      List.of("help", "spawn", "despawn", "reload", "forget", "follow");
+  private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
 
   private final CraftMaid plugin;
   private final MaidNpcService maidNpcService;
@@ -61,6 +62,10 @@ public class CraftMaidCommand implements TabExecutor {
         forgetHistory(sender, args);
         return true;
       }
+      case "follow" -> {
+        followMaid(sender, args);
+        return true;
+      }
       default -> {
         sender.sendMessage(
             Component.text("未知子命令，输入 /" + label + " help 查看用法。", NamedTextColor.RED));
@@ -75,12 +80,21 @@ public class CraftMaidCommand implements TabExecutor {
       @NotNull Command command,
       @NotNull String label,
       @NotNull String[] args) {
-    if (!sender.hasPermission("craftmaid.admin") || args.length != 1) {
+    if (!sender.hasPermission("craftmaid.admin")) {
       return Collections.emptyList();
     }
 
-    String prefix = args[0].toLowerCase(Locale.ROOT);
-    return SUBCOMMANDS.stream().filter(subcommand -> subcommand.startsWith(prefix)).toList();
+    if (args.length == 1) {
+      String prefix = args[0].toLowerCase(Locale.ROOT);
+      return SUBCOMMANDS.stream().filter(subcommand -> subcommand.startsWith(prefix)).toList();
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return FOLLOW_ACTIONS.stream().filter(action -> action.startsWith(prefix)).toList();
+    }
+
+    return Collections.emptyList();
   }
 
   private void spawnMaid(CommandSender sender) {
@@ -146,6 +160,41 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(Component.text("用法: /craftmaid forget <玩家名|all>", NamedTextColor.YELLOW));
   }
 
+  private void followMaid(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以控制女仆跟随。", NamedTextColor.RED));
+      return;
+    }
+
+    if (!maidNpcService.isAvailable()) {
+      sender.sendMessage(Component.text("未安装或未启用 Citizens，无法控制实体女仆。", NamedTextColor.RED));
+      return;
+    }
+
+    if (args.length < 2) {
+      sender.sendMessage(
+          Component.text("用法: /craftmaid follow <start|stop>", NamedTextColor.YELLOW));
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "start" -> {
+        if (!maidNpcService.startFollowing(player)) {
+          sender.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
+          return;
+        }
+        sender.sendMessage(Component.text(plugin.getMaidName() + " 会跟着你。", NamedTextColor.GREEN));
+      }
+      case "stop" -> {
+        maidNpcService.stopFollowing();
+        sender.sendMessage(Component.text(plugin.getMaidName() + " 会留在这里。", NamedTextColor.GREEN));
+      }
+      default ->
+          sender.sendMessage(
+              Component.text("用法: /craftmaid follow <start|stop>", NamedTextColor.YELLOW));
+    }
+  }
+
   private void sendHelp(CommandSender sender, String label) {
     sender.sendMessage(Component.text("CraftMaid 命令：", NamedTextColor.LIGHT_PURPLE));
     sender.sendMessage(
@@ -160,5 +209,8 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(
         Component.text("/" + label + " forget [玩家名|all]", NamedTextColor.YELLOW)
             .append(Component.text(" - 清空对话历史", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " follow <start|stop>", NamedTextColor.YELLOW)
+            .append(Component.text(" - 开始或停止女仆跟随", NamedTextColor.GRAY)));
   }
 }

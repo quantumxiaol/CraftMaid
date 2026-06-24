@@ -15,7 +15,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 public final class MaidMenuService implements Listener {
-  private static final int MENU_SIZE = 27;
+  private static final int MENU_SIZE = 45;
 
   private final CraftMaid plugin;
 
@@ -30,11 +30,11 @@ public final class MaidMenuService implements Listener {
     holder.setInventory(inventory);
 
     setActionItem(
-        holder, inventory, 10, MaidMenuAction.STATUS, Material.BOOK, "查看状态", "查看当前已接入的能力。");
+        holder, inventory, 10, MaidMenuAction.STATUS, Material.BOOK, "查看状态", "查看当前能力和状态。");
     setActionItem(
         holder,
         inventory,
-        12,
+        11,
         MaidMenuAction.RECALL,
         Material.ENDER_PEARL,
         "召回到身边",
@@ -42,28 +42,58 @@ public final class MaidMenuService implements Listener {
     setActionItem(
         holder,
         inventory,
-        14,
-        MaidMenuAction.FOLLOW_PLACEHOLDER,
-        Material.LEAD,
-        "跟随我",
-        "占位按钮：下一步接 Citizens Navigator。");
+        12,
+        MaidMenuAction.SET_HOME,
+        Material.RED_BED,
+        "设置 home",
+        "把女仆当前位置记录为 home。");
     setActionItem(
         holder,
         inventory,
-        15,
-        MaidMenuAction.GUARD_PLACEHOLDER,
+        13,
+        MaidMenuAction.RETURN_HOME,
+        Material.COMPASS,
+        "回家",
+        "把女仆送回已记录的 home。");
+    setActionItem(
+        holder, inventory, 14, MaidMenuAction.LOOK_AT_PLAYER, Material.SPYGLASS, "看向我", "让女仆转向你。");
+    setActionItem(
+        holder, inventory, 19, MaidMenuAction.FOLLOW_START, Material.LEAD, "跟随我", "让女仆跟随你。");
+    setActionItem(
+        holder, inventory, 20, MaidMenuAction.FOLLOW_STOP, Material.SLIME_BALL, "别跟了", "停止当前跟随。");
+    setActionItem(
+        holder,
+        inventory,
+        23,
+        MaidMenuAction.GUARD_START,
         Material.IRON_SWORD,
         "保护我",
-        "占位按钮：后续接 Sentinel。");
+        "需要 Sentinel。");
     setActionItem(
         holder,
         inventory,
-        16,
+        24,
+        MaidMenuAction.GUARD_STOP,
+        Material.SHIELD,
+        "停止护卫",
+        "停止 Sentinel 护卫状态。");
+    setActionItem(
+        holder,
+        inventory,
+        25,
+        MaidMenuAction.GUARD_HERE,
+        Material.BELL,
+        "守在这里",
+        "需要 Sentinel；让女仆守住当前位置。");
+    setActionItem(
+        holder,
+        inventory,
+        31,
         MaidMenuAction.FISHING_PLACEHOLDER,
         Material.FISHING_ROD,
         "去钓鱼",
         "占位按钮：后续接 Denizen 或 CraftMaid job。");
-    setActionItem(holder, inventory, 22, MaidMenuAction.CLOSE, Material.BARRIER, "关闭", "关闭菜单。");
+    setActionItem(holder, inventory, 40, MaidMenuAction.CLOSE, Material.BARRIER, "关闭", "关闭菜单。");
 
     player.openInventory(inventory);
   }
@@ -93,11 +123,14 @@ public final class MaidMenuService implements Listener {
     switch (action) {
       case STATUS -> sendStatus(player);
       case RECALL -> recallMaid(player);
-      case FOLLOW_PLACEHOLDER ->
-          player.sendMessage(
-              Component.text("跟随功能还没有接入；下一步会接 Citizens Navigator。", NamedTextColor.YELLOW));
-      case GUARD_PLACEHOLDER ->
-          player.sendMessage(Component.text("护卫功能还没有接入；后续会接 Sentinel。", NamedTextColor.YELLOW));
+      case SET_HOME -> setHome(player);
+      case RETURN_HOME -> returnHome(player);
+      case LOOK_AT_PLAYER -> lookAtPlayer(player);
+      case FOLLOW_START -> startFollowing(player);
+      case FOLLOW_STOP -> stopFollowing(player);
+      case GUARD_START -> startGuarding(player);
+      case GUARD_STOP -> stopGuarding(player);
+      case GUARD_HERE -> startGuardingHere(player);
       case FISHING_PLACEHOLDER ->
           player.sendMessage(Component.text("钓鱼功能还没有接入；后续会先接 Denizen 原型。", NamedTextColor.YELLOW));
       case CLOSE -> player.closeInventory();
@@ -108,14 +141,36 @@ public final class MaidMenuService implements Listener {
     player.sendMessage(
         Component.text(plugin.getMaidName() + " 当前状态：", NamedTextColor.LIGHT_PURPLE));
     player.sendMessage(Component.text("- AI 对话：可用", NamedTextColor.GRAY));
-    player.sendMessage(Component.text("- Citizens 实体：可用", NamedTextColor.GRAY));
+    player.sendMessage(
+        Component.text("- Citizens 实体：", NamedTextColor.GRAY)
+            .append(
+                Component.text(
+                    plugin.getMaidNpcService().isAvailable() ? "可用" : "不可用",
+                    NamedTextColor.WHITE)));
     player.sendMessage(Component.text("- 右键菜单：可用", NamedTextColor.GRAY));
-    player.sendMessage(Component.text("- 跟随 / 护卫 / 钓鱼 / 家务：尚未接入", NamedTextColor.YELLOW));
+    player.sendMessage(
+        Component.text("- home：", NamedTextColor.GRAY)
+            .append(
+                Component.text(
+                    plugin.getMaidNpcService().getHomeLocation() == null ? "未设置" : "已设置",
+                    NamedTextColor.WHITE)));
+    player.sendMessage(
+        Component.text("- 跟随：", NamedTextColor.GRAY)
+            .append(
+                Component.text(
+                    plugin.getMaidNpcService().isFollowing() ? "进行中" : "未进行",
+                    NamedTextColor.WHITE)));
+    player.sendMessage(
+        Component.text("- Sentinel 护卫：", NamedTextColor.GRAY)
+            .append(
+                Component.text(
+                    plugin.getMaidNpcService().isGuardAvailable() ? "可用" : "不可用",
+                    NamedTextColor.WHITE)));
+    player.sendMessage(Component.text("- 钓鱼 / 家务：尚未接入", NamedTextColor.YELLOW));
   }
 
   private void recallMaid(Player player) {
-    if (!plugin.getMaidNpcService().isAvailable()) {
-      player.sendMessage(Component.text("未安装或未启用 Citizens，无法召回实体女仆。", NamedTextColor.RED));
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
 
@@ -127,6 +182,137 @@ public final class MaidMenuService implements Listener {
     player.closeInventory();
     player.sendMessage(
         Component.text("已把 " + plugin.getMaidName() + " 召回到你身边。", NamedTextColor.GREEN));
+  }
+
+  private void setHome(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    boolean saved = plugin.getMaidNpcService().setHomeAtMaidLocation(player);
+    if (!saved) {
+      player.sendMessage(Component.text("设置 home 失败，请确认女仆实体存在。", NamedTextColor.RED));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(
+        Component.text("已把当前位置记录为 " + plugin.getMaidName() + " 的 home。", NamedTextColor.GREEN));
+  }
+
+  private void returnHome(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    boolean returned = plugin.getMaidNpcService().returnHome();
+    if (!returned) {
+      player.sendMessage(Component.text("还没有设置 home，先在菜单里点“设置 home”。", NamedTextColor.YELLOW));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 已回到 home。", NamedTextColor.GREEN));
+  }
+
+  private void lookAtPlayer(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    boolean looked = plugin.getMaidNpcService().lookAt(player);
+    if (!looked) {
+      player.sendMessage(Component.text("女仆当前不在世界里，无法看向你。", NamedTextColor.YELLOW));
+      return;
+    }
+    player.sendMessage(Component.text(plugin.getMaidName() + " 看向了你。", NamedTextColor.GREEN));
+  }
+
+  private void startFollowing(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    boolean started = plugin.getMaidNpcService().startFollowing(player);
+    if (!started) {
+      player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 会跟着你。", NamedTextColor.GREEN));
+  }
+
+  private void stopFollowing(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    plugin.getMaidNpcService().stopFollowing();
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 会留在这里。", NamedTextColor.GREEN));
+  }
+
+  private void startGuarding(Player player) {
+    if (!ensureControlAllowed(player)
+        || !ensureNpcAvailable(player)
+        || !ensureSentinelAvailable(player)) {
+      return;
+    }
+    boolean started = plugin.getMaidNpcService().startGuarding(player);
+    if (!started) {
+      player.sendMessage(Component.text("启动护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 会保护你。", NamedTextColor.GREEN));
+  }
+
+  private void stopGuarding(Player player) {
+    if (!ensureControlAllowed(player)
+        || !ensureNpcAvailable(player)
+        || !ensureSentinelAvailable(player)) {
+      return;
+    }
+    boolean stopped = plugin.getMaidNpcService().stopGuarding();
+    if (!stopped) {
+      player.sendMessage(Component.text("停止护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 已停止护卫。", NamedTextColor.GREEN));
+  }
+
+  private void startGuardingHere(Player player) {
+    if (!ensureControlAllowed(player)
+        || !ensureNpcAvailable(player)
+        || !ensureSentinelAvailable(player)) {
+      return;
+    }
+    boolean started = plugin.getMaidNpcService().startGuardingHere(player);
+    if (!started) {
+      player.sendMessage(Component.text("启动守卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
+      return;
+    }
+    player.closeInventory();
+    player.sendMessage(Component.text(plugin.getMaidName() + " 会守住这里。", NamedTextColor.GREEN));
+  }
+
+  private boolean ensureControlAllowed(Player player) {
+    if (player.hasPermission("craftmaid.admin")
+        || player.getName().equalsIgnoreCase(plugin.getMasterName())) {
+      return true;
+    }
+    player.sendMessage(Component.text("只有主人或管理员可以控制女仆。", NamedTextColor.RED));
+    return false;
+  }
+
+  private boolean ensureNpcAvailable(Player player) {
+    if (plugin.getMaidNpcService().isAvailable()) {
+      return true;
+    }
+    player.sendMessage(Component.text("未安装或未启用 Citizens，实体功能不可用。", NamedTextColor.RED));
+    return false;
+  }
+
+  private boolean ensureSentinelAvailable(Player player) {
+    if (plugin.getMaidNpcService().isGuardAvailable()) {
+      return true;
+    }
+    player.sendMessage(Component.text("未安装或未启用 Sentinel，护卫功能不可用。", NamedTextColor.RED));
+    return false;
   }
 
   private void setActionItem(

@@ -1,6 +1,7 @@
 package com.github.quantumxiaol.craftmaid;
 
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
+import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
@@ -45,11 +46,23 @@ public final class CraftMaid extends JavaPlugin {
       craftMaidCommand.setTabCompleter(commandExecutor);
     }
 
+    PluginCommand followCommand = getCommand("follow");
+    if (followCommand == null) {
+      getLogger().severe("plugin.yml 中缺少 follow 命令，跟随快捷命令不可用。");
+    } else {
+      FollowCommand commandExecutor = new FollowCommand(this);
+      followCommand.setExecutor(commandExecutor);
+      followCommand.setTabCompleter(commandExecutor);
+    }
+
     getLogger().info("🎀 CraftMaid 启动完毕！在游戏里喊“" + getMaidName() + "”试试看。");
   }
 
   @Override
   public void onDisable() {
+    if (maidNpcService != null) {
+      maidNpcService.stopFollowing();
+    }
     if (conversationHistory != null) {
       conversationHistory.save();
     }

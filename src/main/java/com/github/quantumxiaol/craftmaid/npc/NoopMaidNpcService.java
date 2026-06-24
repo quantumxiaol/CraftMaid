@@ -1,6 +1,7 @@
 package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
 final class NoopMaidNpcService implements MaidNpcService {
@@ -24,6 +25,61 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean despawnStored() {
+    return false;
+  }
+
+  @Override
+  public boolean setHomeAtMaidLocation(Player fallbackPlayer) {
+    return false;
+  }
+
+  @Override
+  public Location getHomeLocation() {
+    return null;
+  }
+
+  @Override
+  public boolean returnHome() {
+    return false;
+  }
+
+  @Override
+  public boolean lookAt(Player player) {
+    return false;
+  }
+
+  @Override
+  public boolean startFollowing(Player player) {
+    return false;
+  }
+
+  @Override
+  public boolean stopFollowing() {
+    return false;
+  }
+
+  @Override
+  public boolean isFollowing() {
+    return false;
+  }
+
+  @Override
+  public boolean isGuardAvailable() {
+    return false;
+  }
+
+  @Override
+  public boolean startGuarding(Player player) {
+    return false;
+  }
+
+  @Override
+  public boolean startGuardingHere(Player player) {
+    return false;
+  }
+
+  @Override
+  public boolean stopGuarding() {
     return false;
   }
 }

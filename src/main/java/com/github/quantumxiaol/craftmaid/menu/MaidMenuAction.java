@@ -3,8 +3,14 @@ package com.github.quantumxiaol.craftmaid.menu;
 enum MaidMenuAction {
   STATUS,
   RECALL,
-  FOLLOW_PLACEHOLDER,
-  GUARD_PLACEHOLDER,
+  SET_HOME,
+  RETURN_HOME,
+  LOOK_AT_PLAYER,
+  FOLLOW_START,
+  FOLLOW_STOP,
+  GUARD_START,
+  GUARD_STOP,
+  GUARD_HERE,
   FISHING_PLACEHOLDER,
   CLOSE
 }
