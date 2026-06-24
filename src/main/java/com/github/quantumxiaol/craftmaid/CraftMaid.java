@@ -1,5 +1,6 @@
 package com.github.quantumxiaol.craftmaid;
 
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.combat.MaidLootListener;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
@@ -16,6 +17,7 @@ public final class CraftMaid extends JavaPlugin {
   private CraftMaidConfig config;
   private LlmClient llmClient;
   private ChatListener chatListener;
+  private MaidAnchorService anchorService;
   private ConversationHistory conversationHistory;
   private MaidNpcService maidNpcService;
   private MaidMenuService maidMenuService;
@@ -25,6 +27,8 @@ public final class CraftMaid extends JavaPlugin {
     getLogger().info("🎀 CraftMaid 正在唤醒女仆...");
 
     saveDefaultConfig();
+    anchorService = new MaidAnchorService(this);
+    anchorService.load();
     conversationHistory = new ConversationHistory(this);
     maidNpcService = MaidNpcServices.create(this);
     maidMenuService = new MaidMenuService(this);
@@ -73,6 +77,9 @@ public final class CraftMaid extends JavaPlugin {
 
   public void loadConfiguration() {
     this.config = CraftMaidConfig.load(this);
+    if (anchorService != null) {
+      anchorService.load();
+    }
 
     CraftMaidConfig.LlmSettings llm = config.llm();
     this.llmClient =
@@ -159,6 +166,10 @@ public final class CraftMaid extends JavaPlugin {
 
   public ConversationHistory getConversationHistory() {
     return conversationHistory;
+  }
+
+  public MaidAnchorService getAnchorService() {
+    return anchorService;
   }
 
   public MaidNpcService getMaidNpcService() {

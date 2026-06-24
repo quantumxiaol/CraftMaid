@@ -1,6 +1,10 @@
 package com.github.quantumxiaol.craftmaid.command;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
+import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService.AnchorOperationResult;
+import com.github.quantumxiaol.craftmaid.anchor.RegionCorner;
+import com.github.quantumxiaol.craftmaid.anchor.RegionType;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import java.util.Collections;
@@ -17,8 +21,18 @@ import org.jetbrains.annotations.Nullable;
 
 public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
-      List.of("help", "spawn", "despawn", "reload", "forget", "follow");
+      List.of("help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
+  private static final List<String> ANCHOR_ACTIONS = List.of("set", "list", "remove");
+  private static final List<String> ANCHOR_TYPES =
+      List.of("home", "fishing_spot", "chest", "guard_post", "redstone_watch");
+  private static final List<String> ANCHOR_NAME_SUGGESTIONS =
+      List.of("default", "main", "drops", "crops", "tools", "gate");
+  private static final List<String> REGION_ACTIONS = List.of("set", "list", "remove", "show");
+  private static final List<String> REGION_TYPES = List.of("farm", "pond", "redstone");
+  private static final List<String> REGION_NAME_SUGGESTIONS =
+      List.of("default", "wheat_field", "carrot_field", "backyard", "iron_farm");
+  private static final List<String> REGION_CORNERS = List.of("pos1", "pos2");
 
   private final CraftMaid plugin;
   private final MaidNpcService maidNpcService;
@@ -66,6 +80,14 @@ public class CraftMaidCommand implements TabExecutor {
         followMaid(sender, args);
         return true;
       }
+      case "anchor" -> {
+        handleAnchor(sender, args);
+        return true;
+      }
+      case "region" -> {
+        handleRegion(sender, args);
+        return true;
+      }
       default -> {
         sender.sendMessage(
             Component.text("未知子命令，输入 /" + label + " help 查看用法。", NamedTextColor.RED));
@@ -92,6 +114,64 @@ public class CraftMaidCommand implements TabExecutor {
     if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
       String prefix = args[1].toLowerCase(Locale.ROOT);
       return FOLLOW_ACTIONS.stream().filter(action -> action.startsWith(prefix)).toList();
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("anchor")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return ANCHOR_ACTIONS.stream().filter(action -> action.startsWith(prefix)).toList();
+    }
+
+    if (args.length == 3 && args[0].equalsIgnoreCase("anchor")) {
+      String prefix = args[2].toLowerCase(Locale.ROOT);
+      if (args[1].equalsIgnoreCase("set")) {
+        return filter(ANCHOR_TYPES, prefix);
+      }
+      if (args[1].equalsIgnoreCase("remove")) {
+        return filter(ANCHOR_TYPES, prefix);
+      }
+    }
+
+    if (args.length == 4 && args[0].equalsIgnoreCase("anchor")) {
+      String prefix = args[3].toLowerCase(Locale.ROOT);
+      if (args[1].equalsIgnoreCase("set")) {
+        return filter(ANCHOR_NAME_SUGGESTIONS, prefix);
+      }
+      if (args[1].equalsIgnoreCase("remove")) {
+        return AnchorType.fromInput(args[2])
+            .map(type -> filter(plugin.getAnchorService().anchorNames(type), prefix))
+            .orElse(Collections.emptyList());
+      }
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("region")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return filter(REGION_ACTIONS, prefix);
+    }
+
+    if (args.length == 3 && args[0].equalsIgnoreCase("region")) {
+      String prefix = args[2].toLowerCase(Locale.ROOT);
+      if (args[1].equalsIgnoreCase("set")
+          || args[1].equalsIgnoreCase("remove")
+          || args[1].equalsIgnoreCase("show")) {
+        return filter(REGION_TYPES, prefix);
+      }
+    }
+
+    if (args.length == 4 && args[0].equalsIgnoreCase("region")) {
+      String prefix = args[3].toLowerCase(Locale.ROOT);
+      if (args[1].equalsIgnoreCase("set")) {
+        return filter(REGION_NAME_SUGGESTIONS, prefix);
+      }
+      if (args[1].equalsIgnoreCase("remove") || args[1].equalsIgnoreCase("show")) {
+        return RegionType.fromInput(args[2])
+            .map(type -> filter(plugin.getAnchorService().regionNames(type), prefix))
+            .orElse(Collections.emptyList());
+      }
+    }
+
+    if (args.length == 5 && args[0].equalsIgnoreCase("region") && args[1].equalsIgnoreCase("set")) {
+      String prefix = args[4].toLowerCase(Locale.ROOT);
+      return filter(REGION_CORNERS, prefix);
     }
 
     return Collections.emptyList();
@@ -195,6 +275,178 @@ public class CraftMaidCommand implements TabExecutor {
     }
   }
 
+  private void handleAnchor(CommandSender sender, String[] args) {
+    if (args.length < 2 || args[1].equalsIgnoreCase("list")) {
+      sendAnchorList(sender);
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "set" -> setAnchor(sender, args);
+      case "remove" -> removeAnchor(sender, args);
+      default ->
+          sender.sendMessage(
+              Component.text(
+                  "用法: /craftmaid anchor <set|list|remove> [type] [name]", NamedTextColor.YELLOW));
+    }
+  }
+
+  private void setAnchor(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以设置锚点。", NamedTextColor.RED));
+      return;
+    }
+
+    if (args.length < 4) {
+      sender.sendMessage(
+          Component.text(
+              "用法: /craftmaid anchor set <home|fishing_spot|chest|guard_post|redstone_watch> <name>",
+              NamedTextColor.YELLOW));
+      return;
+    }
+
+    AnchorType.fromInput(args[2])
+        .ifPresentOrElse(
+            type -> {
+              AnchorOperationResult result =
+                  plugin.getAnchorService().setAnchor(type, args[3], player.getLocation());
+              sender.sendMessage(
+                  Component.text(
+                      result.message(),
+                      result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+            },
+            () -> sender.sendMessage(Component.text("未知锚点类型: " + args[2], NamedTextColor.RED)));
+  }
+
+  private void removeAnchor(CommandSender sender, String[] args) {
+    if (args.length < 4) {
+      sender.sendMessage(
+          Component.text(
+              "用法: /craftmaid anchor remove <home|fishing_spot|chest|guard_post|redstone_watch> <name>",
+              NamedTextColor.YELLOW));
+      return;
+    }
+
+    AnchorType.fromInput(args[2])
+        .ifPresentOrElse(
+            type -> {
+              AnchorOperationResult result = plugin.getAnchorService().removeAnchor(type, args[3]);
+              sender.sendMessage(
+                  Component.text(
+                      result.message(),
+                      result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+            },
+            () ->
+                sender.sendMessage(Component.text("未知 anchor 类型: " + args[2], NamedTextColor.RED)));
+  }
+
+  private void sendAnchorList(CommandSender sender) {
+    sender.sendMessage(Component.text("CraftMaid anchors：", NamedTextColor.LIGHT_PURPLE));
+    for (String line : plugin.getAnchorService().anchorStatusLines()) {
+      sender.sendMessage(Component.text(line, NamedTextColor.GRAY));
+    }
+  }
+
+  private void handleRegion(CommandSender sender, String[] args) {
+    if (args.length < 2 || args[1].equalsIgnoreCase("list")) {
+      sendRegionList(sender);
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "set" -> setRegion(sender, args);
+      case "remove" -> removeRegion(sender, args);
+      case "show" -> showRegion(sender, args);
+      default ->
+          sender.sendMessage(
+              Component.text(
+                  "用法: /craftmaid region <set|list|remove|show>", NamedTextColor.YELLOW));
+    }
+  }
+
+  private void setRegion(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以设置 region。", NamedTextColor.RED));
+      return;
+    }
+
+    if (args.length < 5) {
+      sender.sendMessage(
+          Component.text(
+              "用法: /craftmaid region set <farm|pond|redstone> <name> <pos1|pos2>",
+              NamedTextColor.YELLOW));
+      return;
+    }
+
+    OptionalRegionInput input = parseRegionInput(sender, args[2], args[4]);
+    if (input == null) {
+      return;
+    }
+
+    AnchorOperationResult result =
+        plugin
+            .getAnchorService()
+            .setRegionCorner(input.type(), args[3], input.corner(), player.getLocation());
+    sender.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+  }
+
+  private void removeRegion(CommandSender sender, String[] args) {
+    if (args.length < 4) {
+      sender.sendMessage(
+          Component.text(
+              "用法: /craftmaid region remove <farm|pond|redstone> <name>", NamedTextColor.YELLOW));
+      return;
+    }
+
+    RegionType.fromInput(args[2])
+        .ifPresentOrElse(
+            type -> {
+              AnchorOperationResult result = plugin.getAnchorService().removeRegion(type, args[3]);
+              sender.sendMessage(
+                  Component.text(
+                      result.message(),
+                      result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+            },
+            () ->
+                sender.sendMessage(Component.text("未知 region 类型: " + args[2], NamedTextColor.RED)));
+  }
+
+  private void showRegion(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以显示 region。", NamedTextColor.RED));
+      return;
+    }
+
+    if (args.length < 4) {
+      sender.sendMessage(
+          Component.text(
+              "用法: /craftmaid region show <farm|pond|redstone> <name>", NamedTextColor.YELLOW));
+      return;
+    }
+
+    RegionType.fromInput(args[2])
+        .ifPresentOrElse(
+            type -> {
+              AnchorOperationResult result =
+                  plugin.getAnchorService().showRegion(player, type, args[3]);
+              sender.sendMessage(
+                  Component.text(
+                      result.message(),
+                      result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+            },
+            () ->
+                sender.sendMessage(Component.text("未知 region 类型: " + args[2], NamedTextColor.RED)));
+  }
+
+  private void sendRegionList(CommandSender sender) {
+    sender.sendMessage(Component.text("CraftMaid regions：", NamedTextColor.LIGHT_PURPLE));
+    for (String line : plugin.getAnchorService().regionStatusLines()) {
+      sender.sendMessage(Component.text(line, NamedTextColor.GRAY));
+    }
+  }
+
   private void sendHelp(CommandSender sender, String label) {
     sender.sendMessage(Component.text("CraftMaid 命令：", NamedTextColor.LIGHT_PURPLE));
     sender.sendMessage(
@@ -212,5 +464,33 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(
         Component.text("/" + label + " follow <start|stop>", NamedTextColor.YELLOW)
             .append(Component.text(" - 开始或停止女仆跟随", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " anchor <set|list|remove>", NamedTextColor.YELLOW)
+            .append(Component.text(" - 管理命名单点 anchor", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " region <set|list|remove|show>", NamedTextColor.YELLOW)
+            .append(Component.text(" - 管理命名长方体 region", NamedTextColor.GRAY)));
   }
+
+  private OptionalRegionInput parseRegionInput(
+      CommandSender sender, String typeInput, String cornerInput) {
+    RegionType type = RegionType.fromInput(typeInput).orElse(null);
+    if (type == null) {
+      sender.sendMessage(Component.text("未知 region 类型: " + typeInput, NamedTextColor.RED));
+      return null;
+    }
+
+    RegionCorner corner = RegionCorner.fromInput(cornerInput).orElse(null);
+    if (corner == null) {
+      sender.sendMessage(Component.text("未知 region 角点: " + cornerInput, NamedTextColor.RED));
+      return null;
+    }
+    return new OptionalRegionInput(type, corner);
+  }
+
+  private List<String> filter(List<String> values, String prefix) {
+    return values.stream().filter(value -> value.startsWith(prefix)).toList();
+  }
+
+  private record OptionalRegionInput(RegionType type, RegionCorner corner) {}
 }

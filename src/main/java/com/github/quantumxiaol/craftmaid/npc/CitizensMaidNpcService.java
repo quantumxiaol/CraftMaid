@@ -1,6 +1,8 @@
 package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
+import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.interaction.CitizensMaidInteractionListener;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import net.citizensnpcs.api.CitizensAPI;
@@ -11,7 +13,6 @@ import net.citizensnpcs.api.trait.trait.Equipment.EquipmentSlot;
 import net.citizensnpcs.api.trait.trait.Inventory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
@@ -110,28 +111,15 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     NPC npc = getStoredNpcOrNull();
     Location home =
         npc != null && npc.isSpawned() ? npc.getStoredLocation() : fallbackPlayer.getLocation();
-    saveHomeLocation(home);
-    return true;
+    return plugin
+        .getAnchorService()
+        .setAnchor(AnchorType.HOME, MaidAnchorService.DEFAULT_NAME, home)
+        .success();
   }
 
   @Override
   public Location getHomeLocation() {
-    String worldName = plugin.getConfig().getString("maid.home.world", "");
-    if (worldName == null || worldName.isBlank()) {
-      return null;
-    }
-
-    World world = Bukkit.getWorld(worldName);
-    if (world == null) {
-      return null;
-    }
-
-    double x = plugin.getConfig().getDouble("maid.home.x");
-    double y = plugin.getConfig().getDouble("maid.home.y");
-    double z = plugin.getConfig().getDouble("maid.home.z");
-    float yaw = (float) plugin.getConfig().getDouble("maid.home.yaw");
-    float pitch = (float) plugin.getConfig().getDouble("maid.home.pitch");
-    return new Location(world, x, y, z, yaw, pitch);
+    return plugin.getAnchorService().getHomeLocation();
   }
 
   @Override
@@ -309,7 +297,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
     try {
       Object trait = getSentinelTrait(npc);
-      setHomeAtMaidLocation(player);
       setField(trait, "spawnPoint", npc.getStoredLocation());
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       configureSentinelCombat(trait);
@@ -395,18 +382,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return fallbackPlayer == null ? plugin.getMasterName() : fallbackPlayer.getName();
     }
     return skin;
-  }
-
-  private void saveHomeLocation(Location home) {
-    plugin
-        .getConfig()
-        .set("maid.home.world", home.getWorld() == null ? "" : home.getWorld().getName());
-    plugin.getConfig().set("maid.home.x", home.getX());
-    plugin.getConfig().set("maid.home.y", home.getY());
-    plugin.getConfig().set("maid.home.z", home.getZ());
-    plugin.getConfig().set("maid.home.yaw", home.getYaw());
-    plugin.getConfig().set("maid.home.pitch", home.getPitch());
-    plugin.saveConfig();
   }
 
   private Object getSentinelTrait(NPC npc) throws ClassNotFoundException {

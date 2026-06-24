@@ -1,6 +1,11 @@
 package com.github.quantumxiaol.craftmaid.menu;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
+import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService.AnchorOperationResult;
+import com.github.quantumxiaol.craftmaid.anchor.RegionCorner;
+import com.github.quantumxiaol.craftmaid.anchor.RegionType;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -70,9 +75,81 @@ public final class MaidMenuService implements Listener {
         "配置装备",
         "设置女仆手持物和护甲。");
     setActionItem(
+        holder,
+        inventory,
+        17,
+        MaidMenuAction.LIST_ANCHORS,
+        Material.MAP,
+        "查看锚点",
+        "查看 anchors 和 regions。");
+    setActionItem(
         holder, inventory, 19, MaidMenuAction.FOLLOW_START, Material.LEAD, "跟随我", "让女仆跟随你。");
     setActionItem(
         holder, inventory, 20, MaidMenuAction.FOLLOW_STOP, Material.SLIME_BALL, "别跟了", "停止当前跟随。");
+    setActionItem(
+        holder,
+        inventory,
+        27,
+        MaidMenuAction.SET_FISHING_SPOT,
+        Material.WATER_BUCKET,
+        "设置钓鱼站位",
+        "把你当前位置记录为 fishing_spot/default。");
+    setActionItem(
+        holder,
+        inventory,
+        28,
+        MaidMenuAction.SET_FARM_REGION_POS1,
+        Material.WOODEN_HOE,
+        "设置农田点 1",
+        "把你当前位置记录为 farm/default/pos1。");
+    setActionItem(
+        holder,
+        inventory,
+        29,
+        MaidMenuAction.SET_FARM_REGION_POS2,
+        Material.IRON_HOE,
+        "设置农田点 2",
+        "把你当前位置记录为 farm/default/pos2。");
+    setActionItem(
+        holder,
+        inventory,
+        30,
+        MaidMenuAction.SET_POND_REGION_POS1,
+        Material.KELP,
+        "设置鱼塘点 1",
+        "把你当前位置记录为 pond/default/pos1。");
+    setActionItem(
+        holder,
+        inventory,
+        31,
+        MaidMenuAction.SET_POND_REGION_POS2,
+        Material.SEAGRASS,
+        "设置鱼塘点 2",
+        "把你当前位置记录为 pond/default/pos2。");
+    setActionItem(
+        holder,
+        inventory,
+        32,
+        MaidMenuAction.SET_REDSTONE_REGION_POS1,
+        Material.REDSTONE,
+        "设置红石区点 1",
+        "把你当前位置记录为 redstone/default/pos1。");
+    setActionItem(
+        holder,
+        inventory,
+        33,
+        MaidMenuAction.SET_REDSTONE_REGION_POS2,
+        Material.REPEATER,
+        "设置红石区点 2",
+        "把你当前位置记录为 redstone/default/pos2。");
+    setActionItem(
+        holder,
+        inventory,
+        34,
+        MaidMenuAction.SET_REDSTONE_WATCH,
+        Material.OBSERVER,
+        "设置红石观察点",
+        "把你当前位置记录为 redstone_watch/default。");
     setActionItem(
         holder,
         inventory,
@@ -100,7 +177,7 @@ public final class MaidMenuService implements Listener {
     setActionItem(
         holder,
         inventory,
-        31,
+        35,
         MaidMenuAction.FISHING_PLACEHOLDER,
         Material.FISHING_ROD,
         "去钓鱼",
@@ -161,6 +238,21 @@ public final class MaidMenuService implements Listener {
       case LOOK_AT_PLAYER -> lookAtPlayer(player);
       case OPEN_INVENTORY -> openInventory(player);
       case OPEN_EQUIPMENT -> openEquipment(player);
+      case LIST_ANCHORS -> sendAnchorStatus(player);
+      case SET_FISHING_SPOT -> setAnchorAtPlayer(player, AnchorType.FISHING_SPOT);
+      case SET_REDSTONE_WATCH -> setAnchorAtPlayer(player, AnchorType.REDSTONE_WATCH);
+      case SET_FARM_REGION_POS1 ->
+          setRegionCornerAtPlayer(player, RegionType.FARM, RegionCorner.POS1);
+      case SET_FARM_REGION_POS2 ->
+          setRegionCornerAtPlayer(player, RegionType.FARM, RegionCorner.POS2);
+      case SET_POND_REGION_POS1 ->
+          setRegionCornerAtPlayer(player, RegionType.POND, RegionCorner.POS1);
+      case SET_POND_REGION_POS2 ->
+          setRegionCornerAtPlayer(player, RegionType.POND, RegionCorner.POS2);
+      case SET_REDSTONE_REGION_POS1 ->
+          setRegionCornerAtPlayer(player, RegionType.REDSTONE, RegionCorner.POS1);
+      case SET_REDSTONE_REGION_POS2 ->
+          setRegionCornerAtPlayer(player, RegionType.REDSTONE, RegionCorner.POS2);
       case FOLLOW_START -> startFollowing(player);
       case FOLLOW_STOP -> stopFollowing(player);
       case GUARD_START -> startGuarding(player);
@@ -196,11 +288,16 @@ public final class MaidMenuService implements Listener {
                     NamedTextColor.WHITE)));
     player.sendMessage(Component.text("- 右键菜单：可用", NamedTextColor.GRAY));
     player.sendMessage(
-        Component.text("- home：", NamedTextColor.GRAY)
-            .append(
-                Component.text(
-                    plugin.getMaidNpcService().getHomeLocation() == null ? "未设置" : "已设置",
-                    NamedTextColor.WHITE)));
+        Component.text("- " + plugin.getAnchorService().homeStatusLine(), NamedTextColor.GRAY));
+    player.sendMessage(
+        Component.text(
+            "- " + plugin.getAnchorService().defaultFarmStatusLine(), NamedTextColor.GRAY));
+    player.sendMessage(
+        Component.text(
+            "- " + plugin.getAnchorService().defaultPondStatusLine(), NamedTextColor.GRAY));
+    player.sendMessage(
+        Component.text(
+            "- " + plugin.getAnchorService().defaultRedstoneStatusLine(), NamedTextColor.GRAY));
     player.sendMessage(
         Component.text("- 跟随：", NamedTextColor.GRAY)
             .append(
@@ -214,6 +311,51 @@ public final class MaidMenuService implements Listener {
                     plugin.getMaidNpcService().isGuardAvailable() ? "可用" : "不可用",
                     NamedTextColor.WHITE)));
     player.sendMessage(Component.text("- 钓鱼 / 家务：尚未接入", NamedTextColor.YELLOW));
+  }
+
+  private void sendAnchorStatus(Player player) {
+    player.sendMessage(Component.text("CraftMaid anchors：", NamedTextColor.LIGHT_PURPLE));
+    for (String line : plugin.getAnchorService().anchorStatusLines()) {
+      player.sendMessage(Component.text(line, NamedTextColor.GRAY));
+    }
+    player.sendMessage(Component.text("CraftMaid regions：", NamedTextColor.LIGHT_PURPLE));
+    for (String line : plugin.getAnchorService().regionStatusLines()) {
+      player.sendMessage(Component.text(line, NamedTextColor.GRAY));
+    }
+  }
+
+  private void setAnchorAtPlayer(Player player, AnchorType type) {
+    if (!ensureControlAllowed(player)) {
+      return;
+    }
+
+    AnchorOperationResult result =
+        plugin
+            .getAnchorService()
+            .setAnchor(type, MaidAnchorService.DEFAULT_NAME, player.getLocation());
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+    if (result.success()) {
+      player.closeInventory();
+    }
+  }
+
+  private void setRegionCornerAtPlayer(Player player, RegionType type, RegionCorner corner) {
+    if (!ensureControlAllowed(player)) {
+      return;
+    }
+
+    AnchorOperationResult result =
+        plugin
+            .getAnchorService()
+            .setRegionCorner(type, MaidAnchorService.DEFAULT_NAME, corner, player.getLocation());
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+    if (result.success()) {
+      player.closeInventory();
+    }
   }
 
   private void recallMaid(Player player) {
@@ -242,7 +384,8 @@ public final class MaidMenuService implements Listener {
     }
     player.closeInventory();
     player.sendMessage(
-        Component.text("已把当前位置记录为 " + plugin.getMaidName() + " 的 home。", NamedTextColor.GREEN));
+        Component.text(
+            "已把 " + plugin.getMaidName() + " 的当前位置记录为 home/default。", NamedTextColor.GREEN));
   }
 
   private void returnHome(Player player) {
@@ -251,7 +394,8 @@ public final class MaidMenuService implements Listener {
     }
     boolean returned = plugin.getMaidNpcService().returnHome();
     if (!returned) {
-      player.sendMessage(Component.text("还没有设置 home，先在菜单里点“设置 home”。", NamedTextColor.YELLOW));
+      player.sendMessage(
+          Component.text("还没有设置 home/default，先在菜单里点“设置 home”。", NamedTextColor.YELLOW));
       return;
     }
     player.closeInventory();
