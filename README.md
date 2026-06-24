@@ -30,12 +30,13 @@ cd CraftMaid
 mvn clean package
 ```
 编译完成后，将 `target/CraftMaid-1.0-SNAPSHOT.jar` 放入服务端的 `plugins` 文件夹下。
+提交代码前可以运行 `mvn spotless:apply` 自动整理 Java 格式；CI 会执行 `mvn -B spotless:check` 和 `mvn -B clean package`。
 
 ## 🚀 GitHub Actions 自动发布
 
 仓库包含 `.github/workflows/build-release.yml`：
 
-* 每次 push / pull request 会自动执行 `mvn -B clean package`，并把构建出的 jar 作为 workflow artifact 上传。
+* 每次 push / pull request 会自动执行 `mvn -B spotless:check` 和 `mvn -B clean package`，并把构建出的 jar 作为 workflow artifact 上传。
 * 推送 `v*` tag 时，会自动创建或更新 GitHub Release，并上传 `CraftMaid-<tag>.jar`。
 
 发布新版本：
