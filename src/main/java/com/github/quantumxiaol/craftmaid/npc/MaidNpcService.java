@@ -2,12 +2,15 @@ package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import org.bukkit.Location;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 public interface MaidNpcService {
   boolean isAvailable();
 
   boolean isMaidNpc(int npcId);
+
+  boolean isMaidEntity(Entity entity);
 
   void registerInteractionListener(MaidMenuService menuService);
 

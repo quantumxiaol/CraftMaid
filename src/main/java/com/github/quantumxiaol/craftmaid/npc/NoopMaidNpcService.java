@@ -2,6 +2,7 @@ package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import org.bukkit.Location;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 final class NoopMaidNpcService implements MaidNpcService {
@@ -12,6 +13,11 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean isMaidNpc(int npcId) {
+    return false;
+  }
+
+  @Override
+  public boolean isMaidEntity(Entity entity) {
     return false;
   }
 

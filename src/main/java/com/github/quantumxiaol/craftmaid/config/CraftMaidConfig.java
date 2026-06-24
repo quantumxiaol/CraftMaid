@@ -33,7 +33,10 @@ public record CraftMaidConfig(
             getConfigString(plugin, "maid.name", "露西"),
             getConfigString(plugin, "maid.master", "PlayerName"),
             getConfigString(plugin, "maid.language", "中文"),
-            getConfigString(plugin, "maid.skin", "master"));
+            getConfigString(plugin, "maid.skin", "master"),
+            plugin.getConfig().getBoolean("maid.combat.enemy_drops", true),
+            plugin.getConfig().getBoolean("maid.combat.enemy_exp", true),
+            Math.max(0, plugin.getConfig().getInt("maid.combat.default_enemy_exp", 5)));
 
     ChatSettings chat =
         new ChatSettings(
@@ -91,7 +94,14 @@ public record CraftMaidConfig(
       int maxTokens,
       int timeoutSeconds) {}
 
-  public record MaidSettings(String name, String master, String language, String skin) {}
+  public record MaidSettings(
+      String name,
+      String master,
+      String language,
+      String skin,
+      boolean enemyDrops,
+      boolean enemyExp,
+      int defaultEnemyExp) {}
 
   public record ChatSettings(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}

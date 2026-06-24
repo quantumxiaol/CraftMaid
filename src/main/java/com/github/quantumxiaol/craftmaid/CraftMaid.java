@@ -1,5 +1,6 @@
 package com.github.quantumxiaol.craftmaid;
 
+import com.github.quantumxiaol.craftmaid.combat.MaidLootListener;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
@@ -35,6 +36,7 @@ public final class CraftMaid extends JavaPlugin {
     chatListener = new ChatListener(this, llmClient);
     getServer().getPluginManager().registerEvents(chatListener, this);
     getServer().getPluginManager().registerEvents(maidMenuService, this);
+    getServer().getPluginManager().registerEvents(new MaidLootListener(this), this);
     maidNpcService.registerInteractionListener(maidMenuService);
 
     PluginCommand craftMaidCommand = getCommand("craftmaid");
@@ -113,6 +115,18 @@ public final class CraftMaid extends JavaPlugin {
 
   public String getMaidSkin() {
     return config.maid().skin();
+  }
+
+  public boolean isMaidEnemyDropsEnabled() {
+    return config.maid().enemyDrops();
+  }
+
+  public boolean isMaidEnemyExpEnabled() {
+    return config.maid().enemyExp();
+  }
+
+  public int getMaidDefaultEnemyExp() {
+    return config.maid().defaultEnemyExp();
   }
 
   public String getSystemPrompt() {

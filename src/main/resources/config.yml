@@ -12,6 +12,12 @@ maid:
   language: "中文"
   # NPC 皮肤来源：master=使用 maid.master 的皮肤；player=使用触发操作的玩家皮肤；none/default=不主动设置；也可以直接填玩家名。
   skin: "master"
+  combat:
+    # Sentinel 默认会阻止 NPC 击杀敌怪掉落物；这里开启后，护卫初始化时会允许敌怪正常掉落。
+    enemy_drops: true
+    # NPC 击杀不一定被服务端当成玩家击杀；死亡经验为 0 时给敌怪补一个基础经验值。
+    enemy_exp: true
+    default_enemy_exp: 5
   npc_id: -1
   system_prompt: |-
     你是 Minecraft 世界里的女仆 NPC「{name}」，请始终用{language}回复。

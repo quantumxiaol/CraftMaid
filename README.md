@@ -67,6 +67,10 @@ maid:
   master: "PlayerName" # 你的游戏 ID，女仆会对该玩家展现主人的态度
   language: "中文"
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
+  combat:
+    enemy_drops: true # Sentinel 护卫击杀敌怪时允许掉落物
+    enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时补基础经验
+    default_enemy_exp: 5
   system_prompt: |-
     这里可以自定义女仆的人设、称呼习惯、说话风格和行为边界。
     可用占位符：{name}、{master}、{language}。占位符是可选的，完全重写后不包含占位符也可以。
@@ -111,7 +115,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果你的服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
+如果你的服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.combat`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -136,6 +140,8 @@ conversation:
 * 关闭菜单
 
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼”目前仍是占位提示，后续会接 Denizen 原型或 CraftMaid job。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
+
+护卫战斗里，`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落；`maid.combat.enemy_exp: true` 会在女仆击杀敌怪但服务端给出 0 经验时补 `default_enemy_exp` 点经验。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
 
 移除已记录的女仆 NPC：
 ```

@@ -12,6 +12,7 @@ import net.citizensnpcs.api.trait.trait.Inventory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -39,6 +40,18 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   @Override
   public boolean isMaidNpc(int npcId) {
     return plugin.getConfig().getInt("maid.npc_id", -1) == npcId;
+  }
+
+  @Override
+  public boolean isMaidEntity(Entity entity) {
+    if (entity == null) {
+      return false;
+    }
+    NPC npc = getStoredNpcOrNull();
+    return npc != null
+        && npc.isSpawned()
+        && npc.getEntity() != null
+        && npc.getEntity().getUniqueId().equals(entity.getUniqueId());
   }
 
   @Override
@@ -419,6 +432,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private void configureSentinelCombat(Object trait) throws ReflectiveOperationException {
     invoke(trait, "addTarget", new Class<?>[] {String.class}, "monsters");
     invoke(trait, "addAvoid", new Class<?>[] {String.class}, "creepers");
+    optionalSetField(trait, "enemyDrops", plugin.isMaidEnemyDropsEnabled());
     setField(trait, "range", 18.0);
     setField(trait, "guardDistanceMinimum", 4.0);
     setField(trait, "guardSelectionRange", 6.0);
@@ -442,6 +456,15 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private void setField(Object target, String fieldName, Object value)
       throws ReflectiveOperationException {
     target.getClass().getField(fieldName).set(target, value);
+  }
+
+  private void optionalSetField(Object target, String fieldName, Object value)
+      throws ReflectiveOperationException {
+    try {
+      setField(target, fieldName, value);
+    } catch (NoSuchFieldException ignored) {
+      // Older or newer Sentinel builds may expose this only through commands.
+    }
   }
 
   private String rootMessage(Throwable throwable) {
