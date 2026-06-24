@@ -2,7 +2,7 @@ name: CraftMaid
 version: '1.0'
 main: com.github.quantumxiaol.craftmaid.CraftMaid
 api-version: '26.1.2'
-softdepend: [Citizens]
+softdepend: [Citizens, Sentinel, Denizen]
 commands:
   craftmaid:
     description: "管理 CraftMaid 女仆插件"
