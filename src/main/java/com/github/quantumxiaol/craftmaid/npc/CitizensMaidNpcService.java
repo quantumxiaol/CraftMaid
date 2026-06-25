@@ -130,13 +130,17 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
 
     NPC npc = getStoredNpcOrNull();
+    boolean createdNpc = false;
     if (npc == null) {
       npc = CitizensAPI.getNPCRegistry().createNPC(EntityType.PLAYER, plugin.getMaidName());
       plugin.getConfig().set("maid.npc_id", npc.getId());
       plugin.saveConfig();
+      createdNpc = true;
     }
 
-    applyConfiguredSkin(npc, null);
+    if (createdNpc) {
+      applyConfiguredSkin(npc, null);
+    }
     stopFollowing();
     if (npc.isSpawned()) {
       npc.teleport(home, PlayerTeleportEvent.TeleportCause.PLUGIN);
@@ -172,7 +176,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       npc.spawn(player.getLocation());
     }
 
-    applyConfiguredSkin(npc, player);
     stopFollowing();
     NPC followNpc = npc;
     followNpc.getNavigator().setTarget(player, false);
@@ -335,9 +338,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc != null && !npc.isSpawned()) {
       npc.spawn(player.getLocation());
     }
-    if (npc != null) {
-      applyConfiguredSkin(npc, player);
-    }
     return npc;
   }
 
@@ -408,9 +408,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     invoke(trait, "addTarget", new Class<?>[] {String.class}, "monsters");
     invoke(trait, "addAvoid", new Class<?>[] {String.class}, "creepers");
     optionalSetField(trait, "enemyDrops", plugin.isMaidEnemyDropsEnabled());
-    setField(trait, "range", 18.0);
-    setField(trait, "guardDistanceMinimum", 4.0);
-    setField(trait, "guardSelectionRange", 6.0);
+    optionalSetField(trait, "range", 18.0);
+    optionalSetField(trait, "guardDistanceMinimum", 4.0);
+    optionalSetField(trait, "guardSelectionRange", 6.0);
   }
 
   private void invoke(Object target, String methodName, Class<?>[] parameterTypes, Object... args)
@@ -433,12 +433,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     target.getClass().getField(fieldName).set(target, value);
   }
 
-  private void optionalSetField(Object target, String fieldName, Object value)
-      throws ReflectiveOperationException {
+  private void optionalSetField(Object target, String fieldName, Object value) {
     try {
       setField(target, fieldName, value);
-    } catch (NoSuchFieldException ignored) {
-      // Older or newer Sentinel builds may expose this only through commands.
+    } catch (ReflectiveOperationException | IllegalArgumentException ex) {
+      plugin.getLogger().warning("跳过 Sentinel 可选字段 " + fieldName + ": " + rootMessage(ex));
     }
   }
 

@@ -14,7 +14,7 @@ CraftMaid 分成两层能力。
 * **环境上下文**：对话时会采集玩家周围的时间、天气、附近实体和怪物等信息写入提示词。
 * **多轮记忆**：按玩家 UUID 管理历史；超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
-* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、默认锚点/区域设置、跟随和护卫控制。
+* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
@@ -197,6 +197,7 @@ conversation:
 * 看向我
 * 打开背包
 * 配置装备
+* 刷新皮肤
 * 查看 anchors / regions
 * 设置 home/default
 * 设置 fishing_spot/default

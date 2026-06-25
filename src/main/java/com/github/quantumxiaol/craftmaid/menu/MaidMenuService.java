@@ -16,6 +16,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -30,7 +31,6 @@ public final class MaidMenuService implements Listener {
   }
 
   public void openFor(Player player) {
-    plugin.getMaidNpcService().applyConfiguredSkin(player);
     MaidMenuHolder holder = new MaidMenuHolder();
     Inventory inventory =
         Bukkit.createInventory(holder, MENU_SIZE, Component.text(plugin.getMaidName() + "的菜单"));
@@ -74,6 +74,14 @@ public final class MaidMenuService implements Listener {
         Material.ARMOR_STAND,
         "配置装备",
         "设置女仆手持物和护甲。");
+    setActionItem(
+        holder,
+        inventory,
+        18,
+        MaidMenuAction.REFRESH_SKIN,
+        Material.PLAYER_HEAD,
+        "刷新皮肤",
+        "按当前 maid.skin 配置重新应用 NPC 皮肤。");
     setActionItem(
         holder,
         inventory,
@@ -214,6 +222,33 @@ public final class MaidMenuService implements Listener {
   }
 
   @EventHandler
+  public void onInventoryDrag(InventoryDragEvent event) {
+    Inventory topInventory = event.getView().getTopInventory();
+    if (topInventory.getHolder() instanceof MaidMenuHolder) {
+      event.setCancelled(true);
+      return;
+    }
+
+    if (!(topInventory.getHolder() instanceof MaidEquipmentHolder)) {
+      return;
+    }
+
+    int topSize = topInventory.getSize();
+    boolean touchesTopInventory = event.getRawSlots().stream().anyMatch(slot -> slot < topSize);
+    if (!touchesTopInventory) {
+      return;
+    }
+
+    boolean allTopSlotsAllowed =
+        event.getRawSlots().stream()
+            .filter(slot -> slot < topSize)
+            .allMatch(MaidEquipmentHolder::isEquipmentSlot);
+    if (!allTopSlotsAllowed) {
+      event.setCancelled(true);
+    }
+  }
+
+  @EventHandler
   public void onInventoryClose(InventoryCloseEvent event) {
     Inventory topInventory = event.getInventory();
     if (!(topInventory.getHolder() instanceof MaidEquipmentHolder holder)
@@ -238,6 +273,7 @@ public final class MaidMenuService implements Listener {
       case LOOK_AT_PLAYER -> lookAtPlayer(player);
       case OPEN_INVENTORY -> openInventory(player);
       case OPEN_EQUIPMENT -> openEquipment(player);
+      case REFRESH_SKIN -> refreshSkin(player);
       case LIST_ANCHORS -> sendAnchorStatus(player);
       case SET_FISHING_SPOT -> setAnchorAtPlayer(player, AnchorType.FISHING_SPOT);
       case SET_REDSTONE_WATCH -> setAnchorAtPlayer(player, AnchorType.REDSTONE_WATCH);
@@ -452,6 +488,20 @@ public final class MaidMenuService implements Listener {
               player.openInventory(inventory);
               player.sendMessage(Component.text("把装备放入对应槽位，关闭窗口后保存。", NamedTextColor.GRAY));
             });
+  }
+
+  private void refreshSkin(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+
+    boolean refreshed = plugin.getMaidNpcService().applyConfiguredSkin(player);
+    if (refreshed) {
+      player.sendMessage(Component.text(plugin.getMaidName() + " 的皮肤已刷新。", NamedTextColor.GREEN));
+    } else {
+      player.sendMessage(
+          Component.text("未刷新皮肤：请确认女仆已生成，且 maid.skin 不是 none/default。", NamedTextColor.YELLOW));
+    }
   }
 
   private void startFollowing(Player player) {

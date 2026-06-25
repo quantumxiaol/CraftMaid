@@ -19,8 +19,8 @@ public record AnchorRegion(
         Math.max(firstZ, secondZ));
   }
 
-  public int volume() {
-    return (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+  public long volume() {
+    return 1L * (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
   }
 
   public String shortText() {
