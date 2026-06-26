@@ -79,6 +79,7 @@ public final class FollowCommand implements TabExecutor {
   }
 
   private void startFollowing(Player player) {
+    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始跟随。");
     if (!maidNpcService.startFollowing(player)) {
       player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
       return;

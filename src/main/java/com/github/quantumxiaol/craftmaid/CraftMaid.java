@@ -6,6 +6,8 @@ import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
+import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService;
+import com.github.quantumxiaol.craftmaid.job.MaidJobService;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
@@ -19,6 +21,8 @@ public final class CraftMaid extends JavaPlugin {
   private ChatListener chatListener;
   private MaidAnchorService anchorService;
   private ConversationHistory conversationHistory;
+  private MaidInventoryService maidInventoryService;
+  private MaidJobService jobService;
   private MaidNpcService maidNpcService;
   private MaidMenuService maidMenuService;
 
@@ -30,6 +34,8 @@ public final class CraftMaid extends JavaPlugin {
     anchorService = new MaidAnchorService(this);
     anchorService.load();
     conversationHistory = new ConversationHistory(this);
+    maidInventoryService = new MaidInventoryService(this);
+    jobService = new MaidJobService(this);
     maidNpcService = MaidNpcServices.create(this);
     maidMenuService = new MaidMenuService(this);
     if (!maidNpcService.isAvailable()) {
@@ -68,6 +74,9 @@ public final class CraftMaid extends JavaPlugin {
   public void onDisable() {
     if (maidNpcService != null) {
       maidNpcService.stopFollowing();
+    }
+    if (jobService != null) {
+      jobService.shutdown();
     }
     if (conversationHistory != null) {
       conversationHistory.save();
@@ -170,6 +179,14 @@ public final class CraftMaid extends JavaPlugin {
 
   public MaidAnchorService getAnchorService() {
     return anchorService;
+  }
+
+  public MaidInventoryService getMaidInventoryService() {
+    return maidInventoryService;
+  }
+
+  public MaidJobService getJobService() {
+    return jobService;
   }
 
   public MaidNpcService getMaidNpcService() {

@@ -1,9 +1,11 @@
 package com.github.quantumxiaol.craftmaid.npc;
 
+import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 
 final class NoopMaidNpcService implements MaidNpcService {
   @Override
@@ -75,8 +77,33 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean moveTo(Location location) {
+    return false;
+  }
+
+  @Override
+  public boolean isNear(Location location, double distance) {
+    return false;
+  }
+
+  @Override
+  public boolean lookAt(Location location) {
+    return false;
+  }
+
+  @Override
+  public boolean swingMainHand() {
+    return false;
+  }
+
+  @Override
   public boolean openInventory(Player player) {
     return false;
+  }
+
+  @Override
+  public InventoryInsertResult addInventoryItem(ItemStack item) {
+    return InventoryInsertResult.failure("未安装或未启用 Citizens，无法写入女仆背包。");
   }
 
   @Override
@@ -91,6 +118,11 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean isGuardAvailable() {
+    return false;
+  }
+
+  @Override
+  public boolean isGuarding() {
     return false;
   }
 

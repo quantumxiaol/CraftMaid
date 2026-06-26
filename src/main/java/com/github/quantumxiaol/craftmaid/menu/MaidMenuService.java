@@ -6,6 +6,7 @@ import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService.AnchorOperationResult;
 import com.github.quantumxiaol.craftmaid.anchor.RegionCorner;
 import com.github.quantumxiaol.craftmaid.anchor.RegionType;
+import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
 import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -186,10 +187,10 @@ public final class MaidMenuService implements Listener {
         holder,
         inventory,
         35,
-        MaidMenuAction.FISHING_PLACEHOLDER,
+        MaidMenuAction.FISHING_START,
         Material.FISHING_ROD,
         "去钓鱼",
-        "占位按钮：后续接 Denizen 或 CraftMaid job。");
+        "使用 fishing_spot/default 和 pond/default。");
     setActionItem(holder, inventory, 40, MaidMenuAction.CLOSE, Material.BARRIER, "关闭", "关闭菜单。");
 
     player.openInventory(inventory);
@@ -294,8 +295,7 @@ public final class MaidMenuService implements Listener {
       case GUARD_START -> startGuarding(player);
       case GUARD_STOP -> stopGuarding(player);
       case GUARD_HERE -> startGuardingHere(player);
-      case FISHING_PLACEHOLDER ->
-          player.sendMessage(Component.text("钓鱼功能还没有接入；后续会先接 Denizen 原型。", NamedTextColor.YELLOW));
+      case FISHING_START -> startFishing(player);
       case CLOSE -> player.closeInventory();
     }
   }
@@ -346,7 +346,9 @@ public final class MaidMenuService implements Listener {
                 Component.text(
                     plugin.getMaidNpcService().isGuardAvailable() ? "可用" : "不可用",
                     NamedTextColor.WHITE)));
-    player.sendMessage(Component.text("- 钓鱼 / 家务：尚未接入", NamedTextColor.YELLOW));
+    player.sendMessage(
+        Component.text("- " + plugin.getJobService().statusLine(), NamedTextColor.GRAY));
+    player.sendMessage(Component.text("- 家务：尚未接入", NamedTextColor.YELLOW));
   }
 
   private void sendAnchorStatus(Player player) {
@@ -508,6 +510,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
+    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始跟随。");
     boolean started = plugin.getMaidNpcService().startFollowing(player);
     if (!started) {
       player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
@@ -532,6 +535,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
+    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始护卫。");
     boolean started = plugin.getMaidNpcService().startGuarding(player);
     if (!started) {
       player.sendMessage(Component.text("启动护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
@@ -562,6 +566,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
+    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始守卫。");
     boolean started = plugin.getMaidNpcService().startGuardingHere(player);
     if (!started) {
       player.sendMessage(Component.text("启动守卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
@@ -569,6 +574,18 @@ public final class MaidMenuService implements Listener {
     }
     player.closeInventory();
     player.sendMessage(Component.text(plugin.getMaidName() + " 会守住这里。", NamedTextColor.GREEN));
+  }
+
+  private void startFishing(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    JobActionResult result =
+        plugin.getJobService().startFishing(player, MaidAnchorService.DEFAULT_NAME);
+    player.closeInventory();
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
   }
 
   private boolean ensureControlAllowed(Player player) {

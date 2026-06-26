@@ -6,6 +6,7 @@ import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService.AnchorOperatio
 import com.github.quantumxiaol.craftmaid.anchor.RegionCorner;
 import com.github.quantumxiaol.craftmaid.anchor.RegionType;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
+import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import java.util.Collections;
 import java.util.List;
@@ -21,8 +22,13 @@ import org.jetbrains.annotations.Nullable;
 
 public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
-      List.of("help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region");
+      List.of(
+          "help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region", "job",
+          "fishing");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
+  private static final List<String> JOB_ACTIONS = List.of("status", "stop");
+  private static final List<String> FISHING_ACTIONS = List.of("start", "stop");
+  private static final List<String> FISHING_NAMES = List.of("main", "default");
   private static final List<String> ANCHOR_ACTIONS = List.of("set", "list", "remove");
   private static final List<String> ANCHOR_TYPES =
       List.of("home", "fishing_spot", "chest", "guard_post", "redstone_watch");
@@ -88,6 +94,14 @@ public class CraftMaidCommand implements TabExecutor {
         handleRegion(sender, args);
         return true;
       }
+      case "job" -> {
+        handleJob(sender, args);
+        return true;
+      }
+      case "fishing" -> {
+        handleFishing(sender, args);
+        return true;
+      }
       default -> {
         sender.sendMessage(
             Component.text("未知子命令，输入 /" + label + " help 查看用法。", NamedTextColor.RED));
@@ -114,6 +128,23 @@ public class CraftMaidCommand implements TabExecutor {
     if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
       String prefix = args[1].toLowerCase(Locale.ROOT);
       return FOLLOW_ACTIONS.stream().filter(action -> action.startsWith(prefix)).toList();
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("job")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return filter(JOB_ACTIONS, prefix);
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("fishing")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return filter(FISHING_ACTIONS, prefix);
+    }
+
+    if (args.length == 3
+        && args[0].equalsIgnoreCase("fishing")
+        && args[1].equalsIgnoreCase("start")) {
+      String prefix = args[2].toLowerCase(Locale.ROOT);
+      return filter(FISHING_NAMES, prefix);
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("anchor")) {
@@ -259,6 +290,7 @@ public class CraftMaidCommand implements TabExecutor {
 
     switch (args[1].toLowerCase(Locale.ROOT)) {
       case "start" -> {
+        plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始跟随。");
         if (!maidNpcService.startFollowing(player)) {
           sender.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
           return;
@@ -273,6 +305,56 @@ public class CraftMaidCommand implements TabExecutor {
           sender.sendMessage(
               Component.text("用法: /craftmaid follow <start|stop>", NamedTextColor.YELLOW));
     }
+  }
+
+  private void handleJob(CommandSender sender, String[] args) {
+    if (args.length < 2 || args[1].equalsIgnoreCase("status")) {
+      sender.sendMessage(Component.text(plugin.getJobService().statusLine(), NamedTextColor.GRAY));
+      return;
+    }
+
+    if (args[1].equalsIgnoreCase("stop")) {
+      JobActionResult result = plugin.getJobService().stopActiveJob("job 已手动停止。");
+      sender.sendMessage(
+          Component.text(
+              result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+      return;
+    }
+
+    sender.sendMessage(Component.text("用法: /craftmaid job <status|stop>", NamedTextColor.YELLOW));
+  }
+
+  private void handleFishing(CommandSender sender, String[] args) {
+    if (args.length < 2) {
+      sender.sendMessage(
+          Component.text("用法: /craftmaid fishing <start|stop> [name]", NamedTextColor.YELLOW));
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "start" -> startFishing(sender, args);
+      case "stop" -> {
+        JobActionResult result = plugin.getJobService().stopFishing("钓鱼任务已手动停止。");
+        sender.sendMessage(
+            Component.text(
+                result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+      }
+      default ->
+          sender.sendMessage(
+              Component.text("用法: /craftmaid fishing <start|stop> [name]", NamedTextColor.YELLOW));
+    }
+  }
+
+  private void startFishing(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以启动钓鱼任务。", NamedTextColor.RED));
+      return;
+    }
+    String name = args.length >= 3 ? args[2] : "main";
+    JobActionResult result = plugin.getJobService().startFishing(player, name);
+    sender.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
   }
 
   private void handleAnchor(CommandSender sender, String[] args) {
@@ -464,6 +546,12 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(
         Component.text("/" + label + " follow <start|stop>", NamedTextColor.YELLOW)
             .append(Component.text(" - 开始或停止女仆跟随", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " job <status|stop>", NamedTextColor.YELLOW)
+            .append(Component.text(" - 查看或停止当前女仆 job", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " fishing <start|stop> [name]", NamedTextColor.YELLOW)
+            .append(Component.text(" - 启动或停止模拟钓鱼", NamedTextColor.GRAY)));
     sender.sendMessage(
         Component.text("/" + label + " anchor <set|list|remove>", NamedTextColor.YELLOW)
             .append(Component.text(" - 管理命名单点 anchor", NamedTextColor.GRAY)));

@@ -4,6 +4,7 @@ import com.github.quantumxiaol.craftmaid.CraftMaid;
 import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
 import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.interaction.CitizensMaidInteractionListener;
+import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -13,10 +14,13 @@ import net.citizensnpcs.api.trait.trait.Equipment.EquipmentSlot;
 import net.citizensnpcs.api.trait.trait.Inventory;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -28,6 +32,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private final CraftMaid plugin;
   private BukkitTask followTask;
+  private boolean guarding;
 
   public CitizensMaidNpcService(CraftMaid plugin) {
     this.plugin = plugin;
@@ -88,6 +93,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
 
     stopFollowing();
+    guarding = false;
     if (npc.isSpawned()) {
       npc.despawn();
     }
@@ -215,6 +221,54 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean moveTo(Location location) {
+    if (location == null || location.getWorld() == null) {
+      return false;
+    }
+    NPC npc = ensureSpawnedAt(location);
+    if (npc == null) {
+      return false;
+    }
+    npc.getNavigator().setTarget(location);
+    return true;
+  }
+
+  @Override
+  public boolean isNear(Location location, double distance) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null || !npc.isSpawned() || npc.getEntity() == null || location == null) {
+      return false;
+    }
+    Location npcLocation = npc.getEntity().getLocation();
+    if (npcLocation.getWorld() == null || !npcLocation.getWorld().equals(location.getWorld())) {
+      return false;
+    }
+    return npcLocation.distanceSquared(location) <= distance * distance;
+  }
+
+  @Override
+  public boolean lookAt(Location location) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null || !npc.isSpawned() || location == null) {
+      return false;
+    }
+    npc.faceLocation(location);
+    return true;
+  }
+
+  @Override
+  public boolean swingMainHand() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null
+        || !npc.isSpawned()
+        || !(npc.getEntity() instanceof LivingEntity livingEntity)) {
+      return false;
+    }
+    livingEntity.swingMainHand();
+    return true;
+  }
+
+  @Override
   public boolean openInventory(Player player) {
     NPC npc = ensureSpawnedNear(player);
     if (npc == null) {
@@ -223,6 +277,62 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
     npc.getOrAddTrait(Inventory.class).openInventory(player);
     return true;
+  }
+
+  @Override
+  public InventoryInsertResult addInventoryItem(ItemStack item) {
+    if (item == null || item.getType() == Material.AIR || item.getAmount() <= 0) {
+      return InventoryInsertResult.success("没有需要放入女仆背包的物品。");
+    }
+
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return InventoryInsertResult.failure("还没有已记录的女仆 NPC。");
+    }
+
+    Inventory inventory = npc.getOrAddTrait(Inventory.class);
+    ItemStack incoming = item.clone();
+    ItemStack[] contents = inventory.getContents();
+    if (contents == null || contents.length == 0) {
+      contents = new ItemStack[36];
+    }
+
+    int remaining = incoming.getAmount();
+    int maxStackSize = Math.max(1, incoming.getMaxStackSize());
+    for (int slot = 0; slot < contents.length && remaining > 0; slot++) {
+      ItemStack existing = contents[slot];
+      if (existing == null || existing.getType() == Material.AIR || !existing.isSimilar(incoming)) {
+        continue;
+      }
+      int space = Math.min(maxStackSize, existing.getMaxStackSize()) - existing.getAmount();
+      if (space <= 0) {
+        continue;
+      }
+      int added = Math.min(space, remaining);
+      existing.setAmount(existing.getAmount() + added);
+      remaining -= added;
+    }
+
+    for (int slot = 0; slot < contents.length && remaining > 0; slot++) {
+      ItemStack existing = contents[slot];
+      if (existing != null && existing.getType() != Material.AIR) {
+        continue;
+      }
+      int added = Math.min(maxStackSize, remaining);
+      ItemStack placed = incoming.clone();
+      placed.setAmount(added);
+      contents[slot] = placed;
+      remaining -= added;
+    }
+
+    inventory.setContents(contents);
+    if (remaining <= 0) {
+      return InventoryInsertResult.success("已放入女仆背包。");
+    }
+
+    ItemStack leftover = incoming.clone();
+    leftover.setAmount(remaining);
+    return InventoryInsertResult.partial(leftover, "女仆背包空间不足。");
   }
 
   @Override
@@ -274,6 +384,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean isGuarding() {
+    return guarding;
+  }
+
+  @Override
   public boolean startGuarding(Player player) {
     NPC npc = ensureSpawnedNear(player);
     if (npc == null || !isGuardAvailable()) {
@@ -284,6 +399,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       Object trait = getSentinelTrait(npc);
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, player.getUniqueId());
       configureSentinelCombat(trait);
+      guarding = true;
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("启动 Sentinel 护卫失败: " + rootMessage(ex));
@@ -303,6 +419,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       setField(trait, "spawnPoint", npc.getStoredLocation());
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       configureSentinelCombat(trait);
+      guarding = true;
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("启动 Sentinel 守卫失败: " + rootMessage(ex));
@@ -322,6 +439,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       invoke(trait, "removeTarget", new Class<?>[] {String.class}, "monsters");
       invoke(trait, "removeAvoid", new Class<?>[] {String.class}, "creepers");
+      guarding = false;
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("停止 Sentinel 护卫失败: " + rootMessage(ex));
@@ -337,6 +455,20 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
     if (npc != null && !npc.isSpawned()) {
       npc.spawn(player.getLocation());
+    }
+    return npc;
+  }
+
+  private NPC ensureSpawnedAt(Location location) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      npc = CitizensAPI.getNPCRegistry().createNPC(EntityType.PLAYER, plugin.getMaidName());
+      plugin.getConfig().set("maid.npc_id", npc.getId());
+      plugin.saveConfig();
+      applyConfiguredSkin(npc, null);
+    }
+    if (!npc.isSpawned()) {
+      npc.spawn(location);
     }
     return npc;
   }
