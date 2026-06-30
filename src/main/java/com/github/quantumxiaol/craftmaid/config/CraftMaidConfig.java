@@ -6,6 +6,7 @@ public record CraftMaidConfig(
     LlmSettings llm,
     MaidSettings maid,
     ChatSettings chat,
+    IntentSettings intent,
     ConversationSettings conversation,
     JobSettings jobs,
     String systemPrompt) {
@@ -47,6 +48,13 @@ public record CraftMaidConfig(
             Math.max(0, plugin.getConfig().getInt("chat.max_context_entities", 8)),
             plugin.getConfig().getString("chat.reply_prefix", "[{name}] "));
 
+    IntentSettings intent =
+        new IntentSettings(
+            plugin.getConfig().getBoolean("intent.enabled", true),
+            plugin.getConfig().getBoolean("intent.master_only", true),
+            plugin.getConfig().getBoolean("intent.consume_on_match", true),
+            plugin.getConfig().getBoolean("intent.allow_followup_window", true));
+
     ConversationSettings conversation =
         new ConversationSettings(
             plugin.getConfig().getBoolean("conversation.enabled", true),
@@ -80,7 +88,7 @@ public record CraftMaidConfig(
         plugin.getConfig().getString("maid.system_prompt", DEFAULT_SYSTEM_PROMPT);
     String systemPrompt = renderSystemPrompt(rawSystemPrompt, maid);
 
-    return new CraftMaidConfig(llm, maid, chat, conversation, jobs, systemPrompt);
+    return new CraftMaidConfig(llm, maid, chat, intent, conversation, jobs, systemPrompt);
   }
 
   private static String getConfigString(JavaPlugin plugin, String path, String defaultValue) {
@@ -126,6 +134,9 @@ public record CraftMaidConfig(
 
   public record ChatSettings(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}
+
+  public record IntentSettings(
+      boolean enabled, boolean masterOnly, boolean consumeOnMatch, boolean allowFollowupWindow) {}
 
   public record ConversationSettings(
       boolean enabled,

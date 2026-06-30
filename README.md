@@ -20,7 +20,7 @@ CraftMaid 分成两层能力。
 * **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。可选开启 Denizen `/npc fish` 作为表演动画，但 CraftMaid 仍负责产出和背包控制。
 * **ChunkKeeper MVP**：读取 `redstone_watch/<name>`，使用 Paper `addPluginChunkTicket` 保持机器所在 chunk 加载；停止 job 或插件关闭时释放 ticket。
 * **农田收割 MVP**：读取 `farm/<name>`，只处理成熟的白名单 `Ageable` 作物；每 tick 限流，产物以 all-or-nothing 方式进入女仆背包，背包满时停止且不改当前方块。
-* **轻量自然语言 intent**：主人可以说“露西，去钓鱼 / 看住机器 / 收农田 / 停止工作”触发对应安全动作。
+* **轻量自然语言 intent**：主人可以说“露西，去钓鱼 / 看住机器 / 收农田 / 停止工作”触发对应安全动作；这是有限规则匹配，不是 LLM tool call。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
 * **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标；跟随速度可通过 `maid.follow.speed` 调整，默认 `1.35`。
@@ -34,7 +34,7 @@ CraftMaid 分成两层能力。
 * **自动找水域**：钓鱼需要先设置 `region pond/<name>`，暂时不会自动扫描附近水域。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
-* **自然语言动作执行**：LLM 目前只输出聊天文本；“露西，跟着我”还不会自动转换成 `FOLLOW_START`。
+* **完整自然语言动作执行**：LLM 目前只输出聊天文本；只有少量固定 intent 会在请求 LLM 前被规则匹配执行，“露西，跟着我”还不会自动转换成 `FOLLOW_START`。
 * **跟随细节**：当前是第一版，还没有 `follow_distance`、`start_distance`、`teleport_distance`、跨世界处理、卡住恢复或重载后继续跟随。
 
 ## 📦 前置要求
@@ -149,6 +149,11 @@ chat:
   followup_seconds: 180 # 喊过女仆名字后，同一玩家后续发言免唤醒的滑动窗口；0 表示关闭
   max_context_entities: 8 # 写入提示词的周围实体数量上限
   reply_prefix: "[{name}] "
+intent:
+  enabled: true # 有限自然语言意图，不使用 LLM tool call
+  master_only: true # 只有 maid.master 或 craftmaid.admin 可以用聊天触发工作
+  consume_on_match: true # 命中工作意图后不再请求 LLM
+  allow_followup_window: true # 允许 followup_seconds 窗口内免唤醒触发工作意图
 conversation:
   enabled: true
   max_messages: 100 # 超过 N 后调用同一个 LLM 接口压缩为 Memory，并只保留最近 N/5 条原始历史
@@ -284,6 +289,15 @@ Job 状态和钓鱼控制：
 ```
 
 `/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
+
+自然语言 intent 只在玩家喊了女仆名字，或处于 `chat.followup_seconds` 对话窗口内时检测。当前支持有限说法：
+
+* 钓鱼：`去钓鱼`、`开始钓鱼`、`帮我钓鱼`、`去鱼塘`
+* 看机器：`看住机器`、`看红石`、`守机器`、`看住刷铁机`
+* 收农田：`收农田`、`收割农田`、`收作物`、`收庄稼`
+* 停止：`停止工作`、`停下工作`、`别忙了`、`休息一下`、`回来`
+
+带否定或问句的说法不会启动 job，例如 `不要去钓鱼`、`先别收农田`、`不要看机器`、`你会钓鱼吗`、`能不能钓鱼`。这些会继续走普通 AI 对话。
 
 `anchors.yml` 大致结构如下：
 

@@ -43,6 +43,15 @@ chat:
   followup_seconds: 180
   max_context_entities: 8
   reply_prefix: "[{name}] "
+intent:
+  # 有限自然语言意图：不调用 LLM tool call，只把少量固定说法映射到现有 JobService。
+  enabled: true
+  # true 时只有 maid.master 或 craftmaid.admin 可以用聊天触发工作。
+  master_only: true
+  # true 时命中工作意图后不再请求 LLM；false 时会执行动作后继续普通聊天。
+  consume_on_match: true
+  # true 时 followup_seconds 窗口内不带女仆名字也能触发工作意图。
+  allow_followup_window: true
 conversation:
   enabled: true
   # 发送给 LLM 的历史消息上限，不包含 system。超过后会压缩为 Memory，并只保留最近 N/5 条原始历史。

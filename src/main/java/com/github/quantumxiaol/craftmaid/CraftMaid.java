@@ -169,6 +169,10 @@ public final class CraftMaid extends JavaPlugin {
     return config.chat().replyPrefix();
   }
 
+  public CraftMaidConfig.IntentSettings getIntentSettings() {
+    return config.intent();
+  }
+
   public int getConversationSummaryMaxTokens() {
     return config.conversation().summaryMaxTokens();
   }

@@ -3,12 +3,16 @@ package com.github.quantumxiaol.craftmaid;
 import com.github.quantumxiaol.craftmaid.context.WorldContextCollector;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
-import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
+import com.github.quantumxiaol.craftmaid.intent.MaidIntent;
+import com.github.quantumxiaol.craftmaid.intent.MaidIntentDetector;
+import com.github.quantumxiaol.craftmaid.intent.MaidIntentExecutor;
+import com.github.quantumxiaol.craftmaid.intent.MaidIntentResult;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,6 +28,8 @@ import org.bukkit.event.Listener;
 public class ChatListener implements Listener {
   private final CraftMaid plugin;
   private final WorldContextCollector worldContextCollector = new WorldContextCollector();
+  private final MaidIntentDetector intentDetector = new MaidIntentDetector();
+  private final MaidIntentExecutor intentExecutor;
   private final Map<UUID, Long> nextAllowedReplyAt = new ConcurrentHashMap<>();
   private final Map<UUID, Long> conversationActiveUntil = new ConcurrentHashMap<>();
   private final Set<UUID> respondingPlayers = ConcurrentHashMap.newKeySet();
@@ -32,6 +38,7 @@ public class ChatListener implements Listener {
   public ChatListener(CraftMaid plugin, LlmClient llmClient) {
     this.plugin = plugin;
     this.llmClient = llmClient;
+    this.intentExecutor = new MaidIntentExecutor(plugin);
   }
 
   public void updateClient(LlmClient llmClient) {
@@ -76,7 +83,7 @@ public class ChatListener implements Listener {
     }
 
     String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
-    if (tryHandleJobIntent(player, playerSpeech)) {
+    if (tryHandleJobIntent(player, playerSpeech, addressedByName)) {
       return;
     }
 
@@ -94,6 +101,7 @@ public class ChatListener implements Listener {
     String masterName = plugin.getMasterName();
     String environmentStr =
         worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
+    String jobStatus = plugin.getJobService().statusLine();
 
     boolean isMaster = player.getName().equalsIgnoreCase(masterName);
     String identityStr = isMaster ? "主人" : "其他玩家";
@@ -105,8 +113,8 @@ public class ChatListener implements Listener {
 
     String userPrompt =
         String.format(
-            "当前环境：%s 跟我说话的人是 %s (%s) 对我说：“%s”",
-            environmentStr, playerName, identityStr, playerSpeech);
+            "当前环境：%s 当前女仆工作状态：%s 跟我说话的人是 %s (%s) 对我说：“%s”",
+            environmentStr, jobStatus, playerName, identityStr, playerSpeech);
     List<ConversationMessage> conversationMessages =
         plugin.getConversationHistory().buildPromptMessages(playerId, userPrompt);
 
@@ -157,70 +165,26 @@ public class ChatListener implements Listener {
             });
   }
 
-  private boolean tryHandleJobIntent(Player player, String playerSpeech) {
-    String normalized = normalizeIntentText(playerSpeech);
-    if (normalized.isBlank()) {
+  private boolean tryHandleJobIntent(Player player, String playerSpeech, boolean addressedByName) {
+    if (!plugin.getIntentSettings().enabled()) {
+      return false;
+    }
+    if (!addressedByName && !plugin.getIntentSettings().allowFollowupWindow()) {
       return false;
     }
 
-    IntentAction action = detectIntent(normalized);
-    if (action == null) {
+    Optional<MaidIntent> intent = intentDetector.detect(playerSpeech);
+    if (intent.isEmpty()) {
       return false;
     }
-
-    if (!canControl(player)) {
-      player.sendMessage(Component.text("只有主人或管理员可以让女仆执行工作。", NamedTextColor.RED));
-      return true;
+    MaidIntentResult result = intentExecutor.execute(player, intent.get());
+    if (!result.message().isBlank()) {
+      player.sendMessage(
+          Component.text(
+              result.message(),
+              result.success() ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.RED));
     }
-
-    JobActionResult result =
-        switch (action) {
-          case FISHING_START -> plugin.getJobService().startFishingAuto(player);
-          case CHUNK_KEEPER_START -> plugin.getJobService().startChunkKeeperAuto(player);
-          case HARVEST_START -> plugin.getJobService().startHarvestAuto(player);
-          case JOB_STOP -> plugin.getJobService().stopActiveJob("job 已通过聊天停止。");
-        };
-    player.sendMessage(
-        Component.text(
-            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
-    return true;
-  }
-
-  private IntentAction detectIntent(String normalized) {
-    if (containsAny(normalized, "停止工作", "停下工作", "别忙了", "休息一下")) {
-      return IntentAction.JOB_STOP;
-    }
-    if (containsAny(normalized, "去钓鱼", "开始钓鱼", "钓鱼去", "帮我钓鱼")) {
-      return IntentAction.FISHING_START;
-    }
-    if (containsAny(normalized, "看住机器", "看着机器", "守住机器", "守机器", "看红石", "看住红石")) {
-      return IntentAction.CHUNK_KEEPER_START;
-    }
-    if (containsAny(normalized, "收一下农田", "收农田", "收割农田", "收成熟作物", "收一下作物")) {
-      return IntentAction.HARVEST_START;
-    }
-    return null;
-  }
-
-  private boolean canControl(Player player) {
-    return player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName());
-  }
-
-  private boolean containsAny(String text, String... candidates) {
-    for (String candidate : candidates) {
-      if (text.contains(candidate)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private String normalizeIntentText(String text) {
-    if (text == null) {
-      return "";
-    }
-    return text.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+    return result.consumed();
   }
 
   private void triggerMemoryCompression(UUID playerId, LlmClient client) {
@@ -307,13 +271,6 @@ public class ChatListener implements Listener {
 
     nextAllowedReplyAt.put(playerId, now + cooldownSeconds * 1000L);
     return false;
-  }
-
-  private enum IntentAction {
-    FISHING_START,
-    CHUNK_KEEPER_START,
-    HARVEST_START,
-    JOB_STOP
   }
 
   private String rootMessage(Throwable throwable) {
