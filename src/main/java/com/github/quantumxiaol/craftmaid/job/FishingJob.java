@@ -2,8 +2,10 @@ package com.github.quantumxiaol.craftmaid.job;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
 import com.github.quantumxiaol.craftmaid.anchor.AnchorRegion;
+import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig.FishingSettings;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -16,7 +18,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 
-final class FishingJob implements Runnable {
+final class FishingJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 20;
   private static final int MAX_POND_VOLUME = 8192;
   private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
@@ -31,12 +33,17 @@ final class FishingJob implements Runnable {
   private final Location pondCenter;
 
   private BukkitTask task;
+  private JobPhase phase = JobPhase.STARTING;
   private boolean stopped;
-  private boolean arrived;
+  private boolean animationStarted;
   private int travelTicks;
   private int waitTicks;
   private int swingTicks;
   private int catchCount;
+  private int fishCount;
+  private int junkCount;
+  private int treasureCount;
+  private String lastLoot = "none";
 
   FishingJob(
       CraftMaid plugin,
@@ -55,22 +62,49 @@ final class FishingJob implements Runnable {
     this.waitTicks = nextWaitTicks();
   }
 
-  JobActionResult start() {
+  @Override
+  public MaidJobType type() {
+    return MaidJobType.FISHING;
+  }
+
+  @Override
+  public String name() {
+    return name;
+  }
+
+  @Override
+  public UUID ownerId() {
+    return ownerId;
+  }
+
+  @Override
+  public JobPhase phase() {
+    return phase;
+  }
+
+  @Override
+  public JobActionResult start() {
     if (pond.volume() > MAX_POND_VOLUME) {
+      phase = JobPhase.FAILED;
       return JobActionResult.failure("pond/" + name + " 区域太大，当前上限 " + MAX_POND_VOLUME + " 格。");
     }
     World world = plugin.getServer().getWorld(pond.worldName());
     if (world == null) {
+      phase = JobPhase.FAILED;
       return JobActionResult.failure("pond/" + name + " 所在世界未加载: " + pond.worldName());
     }
     if (countWaterBlocks(world) <= 0) {
+      phase = JobPhase.FAILED;
       return JobActionResult.failure("pond/" + name + " 里没有找到水方块。");
     }
     if (!plugin.getMaidNpcService().moveTo(fishingSpot)) {
+      phase = JobPhase.FAILED;
       return JobActionResult.failure("无法让女仆移动到 fishing_spot/" + name + "。");
     }
 
+    phase = JobPhase.TRAVELLING;
     task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, PERIOD_TICKS);
+    plugin.getLogger().info("FishingJob started: " + name + " pond=" + pond.shortText());
     return JobActionResult.success("已开始钓鱼任务: " + name);
   }
 
@@ -84,13 +118,14 @@ final class FishingJob implements Runnable {
       travelTicks += PERIOD_TICKS;
       plugin.getMaidNpcService().moveTo(fishingSpot);
       if (travelTicks >= ARRIVAL_TIMEOUT_TICKS) {
-        stop("钓鱼任务停止：女仆一直没有到达 fishing_spot/" + name + "。");
+        fail("钓鱼任务停止：女仆一直没有到达 fishing_spot/" + name + "。");
       }
       return;
     }
 
-    if (!arrived) {
-      arrived = true;
+    if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
+      phase = JobPhase.RUNNING;
+      startOptionalAnimation();
       notifyOwner("女仆已到达 fishing_spot/" + name + "，开始钓鱼。");
     }
 
@@ -106,36 +141,85 @@ final class FishingJob implements Runnable {
       return;
     }
 
-    ItemStack loot = nextLoot();
-    InventoryInsertResult insertResult = plugin.getMaidInventoryService().addItem(loot);
+    LootRoll lootRoll = nextLoot();
+    InventoryInsertResult insertResult =
+        plugin.getMaidInventoryService().addAllOrNothing(List.of(lootRoll.item()));
     if (!insertResult.success()) {
-      stop("钓鱼任务停止：女仆背包已满或无法写入背包。");
+      fail("钓鱼任务停止：女仆背包已满或无法写入背包。");
       return;
     }
 
-    catchCount++;
-    notifyOwner("女仆钓到了 " + lootName(loot) + " x" + loot.getAmount() + "，已放入背包。");
+    recordCatch(lootRoll);
+    notifyOwner(
+        "女仆钓到了 " + lootName(lootRoll.item()) + " x" + lootRoll.item().getAmount() + "，已放入背包。");
+    plugin
+        .getLogger()
+        .info(
+            "FishingJob catch: "
+                + name
+                + " loot="
+                + lootName(lootRoll.item())
+                + " category="
+                + lootRoll.category()
+                + " total="
+                + catchCount);
     waitTicks = nextWaitTicks();
   }
 
-  void stop(String reason) {
+  @Override
+  public void stop(String reason) {
     if (stopped) {
       return;
     }
-    stopped = true;
-    if (task != null) {
-      task.cancel();
-      task = null;
-    }
-    jobService.onFishingJobStopped(this, reason);
+    phase = JobPhase.STOPPING;
+    stopInternal();
+    phase = JobPhase.STOPPED;
+    jobService.onJobStopped(this, reason);
   }
 
-  void cancelWithoutNotification() {
+  private void fail(String reason) {
+    if (stopped) {
+      return;
+    }
+    phase = JobPhase.FAILED;
+    stopInternal();
+    jobService.onJobStopped(this, reason);
+  }
+
+  private void stopInternal() {
     stopped = true;
     if (task != null) {
       task.cancel();
       task = null;
     }
+    if (animationStarted) {
+      plugin.getMaidNpcService().stopFishingAnimation();
+      animationStarted = false;
+    }
+    plugin
+        .getLogger()
+        .info(
+            "FishingJob stopped: "
+                + name
+                + " catches="
+                + catchCount
+                + " fish="
+                + fishCount
+                + " junk="
+                + junkCount
+                + " treasure="
+                + treasureCount);
+  }
+
+  @Override
+  public void cancelWithoutNotification() {
+    phase = JobPhase.STOPPED;
+    stopInternal();
+  }
+
+  @Override
+  public boolean isRunning() {
+    return !stopped;
   }
 
   void notifyOwner(String message) {
@@ -145,9 +229,36 @@ final class FishingJob implements Runnable {
     }
   }
 
-  String statusLine() {
-    String phase = arrived ? "fishing" : "moving";
-    return "job: fishing/" + name + " phase=" + phase + " catches=" + catchCount;
+  @Override
+  public String statusLine() {
+    return "job: fishing/"
+        + name
+        + " phase="
+        + phase.key()
+        + " catches="
+        + catchCount
+        + " fish="
+        + fishCount
+        + " junk="
+        + junkCount
+        + " treasure="
+        + treasureCount
+        + " next="
+        + Math.max(0, waitTicks / 20)
+        + "s"
+        + " last="
+        + lastLoot;
+  }
+
+  private void startOptionalAnimation() {
+    FishingSettings settings = plugin.getFishingSettings();
+    if (!settings.denizenAnimation()) {
+      return;
+    }
+    animationStarted = plugin.getMaidNpcService().startFishingAnimation(pondCenter);
+    if (!animationStarted) {
+      plugin.getLogger().warning("Denizen fishing animation 已启用，但启动失败；继续使用 CraftMaid 内置钓鱼产出。");
+    }
   }
 
   private Location centerOf(AnchorRegion region) {
@@ -174,35 +285,74 @@ final class FishingJob implements Runnable {
   }
 
   private int nextWaitTicks() {
-    return ThreadLocalRandom.current().nextInt(100, 241);
+    FishingSettings settings = plugin.getFishingSettings();
+    int min = Math.max(20, settings.minWaitTicks());
+    int max = Math.max(min, settings.maxWaitTicks());
+    return ThreadLocalRandom.current().nextInt(min, max + 1);
   }
 
-  private ItemStack nextLoot() {
-    double roll = ThreadLocalRandom.current().nextDouble();
-    if (roll < 0.72) {
-      Material[] fish = {
-        Material.COD, Material.SALMON, Material.TROPICAL_FISH, Material.PUFFERFISH
-      };
-      return new ItemStack(fish[ThreadLocalRandom.current().nextInt(fish.length)], 1);
-    }
-    if (roll < 0.95) {
-      Material[] junk = {
-        Material.BOWL,
-        Material.LEATHER,
-        Material.STICK,
-        Material.STRING,
-        Material.BONE,
-        Material.ROTTEN_FLESH,
-        Material.LILY_PAD
-      };
-      return new ItemStack(junk[ThreadLocalRandom.current().nextInt(junk.length)], 1);
+  private LootRoll nextLoot() {
+    FishingSettings settings = plugin.getFishingSettings();
+    double fishWeight = Math.max(0.0, settings.fishWeight());
+    double junkWeight = Math.max(0.0, settings.junkWeight());
+    double treasureWeight =
+        settings.treasureEnabled() ? Math.max(0.0, settings.treasureWeight()) : 0.0;
+    double total = fishWeight + junkWeight + treasureWeight;
+    if (total <= 0.0) {
+      return fishLoot();
     }
 
+    double roll = ThreadLocalRandom.current().nextDouble(total);
+    if (roll < fishWeight) {
+      return fishLoot();
+    }
+    if (roll < fishWeight + junkWeight) {
+      return junkLoot();
+    }
+    return treasureLoot();
+  }
+
+  private LootRoll fishLoot() {
+    Material[] fish = {Material.COD, Material.SALMON, Material.TROPICAL_FISH, Material.PUFFERFISH};
+    return new LootRoll(
+        new ItemStack(fish[ThreadLocalRandom.current().nextInt(fish.length)], 1), "fish");
+  }
+
+  private LootRoll junkLoot() {
+    Material[] junk = {
+      Material.BOWL,
+      Material.LEATHER,
+      Material.STICK,
+      Material.STRING,
+      Material.BONE,
+      Material.ROTTEN_FLESH,
+      Material.LILY_PAD
+    };
+    return new LootRoll(
+        new ItemStack(junk[ThreadLocalRandom.current().nextInt(junk.length)], 1), "junk");
+  }
+
+  private LootRoll treasureLoot() {
     Material[] treasure = {Material.NAME_TAG, Material.NAUTILUS_SHELL, Material.SADDLE};
-    return new ItemStack(treasure[ThreadLocalRandom.current().nextInt(treasure.length)], 1);
+    return new LootRoll(
+        new ItemStack(treasure[ThreadLocalRandom.current().nextInt(treasure.length)], 1),
+        "treasure");
+  }
+
+  private void recordCatch(LootRoll lootRoll) {
+    catchCount++;
+    lastLoot = lootName(lootRoll.item());
+    switch (lootRoll.category()) {
+      case "fish" -> fishCount++;
+      case "junk" -> junkCount++;
+      case "treasure" -> treasureCount++;
+      default -> {}
+    }
   }
 
   private String lootName(ItemStack item) {
     return item.getType().name().toLowerCase(Locale.ROOT);
   }
+
+  private record LootRoll(ItemStack item, String category) {}
 }

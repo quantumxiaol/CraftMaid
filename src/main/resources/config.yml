@@ -60,3 +60,24 @@ conversation:
     # 默认只放内存；设为 true 后会保存到 plugins/CraftMaid/conversations.json。
     enabled: false
     file: "conversations.json"
+jobs:
+  fishing:
+    # 每次模拟上钩的等待 tick，20 tick 约等于 1 秒。
+    min_wait_ticks: 100
+    max_wait_ticks: 240
+    # loot 权重。宝藏关闭时 treasure_weight 会被忽略。
+    fish_weight: 72.0
+    junk_weight: 23.0
+    treasure_weight: 5.0
+    treasure_enabled: true
+    # 预留给 Denizen 表演层；不改变 CraftMaid 的 loot 和背包控制。
+    denizen_animation: false
+  chunk_keeper:
+    # 0 表示只加载 redstone_watch 所在 chunk；1 表示 3x3 chunks。
+    radius_chunks: 0
+    # true 时会尝试让 Sentinel 在 redstone_watch 处守点；没装 Sentinel 不影响加载 chunk。
+    guard_with_sentinel: false
+  harvest:
+    max_region_volume: 4096
+    max_blocks_per_tick: 4
+    max_blocks_per_run: 128

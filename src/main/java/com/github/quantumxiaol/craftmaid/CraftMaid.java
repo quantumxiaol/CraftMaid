@@ -177,6 +177,22 @@ public final class CraftMaid extends JavaPlugin {
     return config.conversation().summaryTemperature();
   }
 
+  public CraftMaidConfig.JobSettings getJobSettings() {
+    return config.jobs();
+  }
+
+  public CraftMaidConfig.FishingSettings getFishingSettings() {
+    return config.jobs().fishing();
+  }
+
+  public CraftMaidConfig.ChunkKeeperSettings getChunkKeeperSettings() {
+    return config.jobs().chunkKeeper();
+  }
+
+  public CraftMaidConfig.HarvestSettings getHarvestSettings() {
+    return config.jobs().harvest();
+  }
+
   public ConversationHistory getConversationHistory() {
     return conversationHistory;
   }

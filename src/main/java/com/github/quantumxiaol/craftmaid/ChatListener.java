@@ -1,8 +1,10 @@
 package com.github.quantumxiaol.craftmaid;
 
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.context.WorldContextCollector;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
+import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import java.util.List;
@@ -74,6 +76,11 @@ public class ChatListener implements Listener {
       return;
     }
 
+    String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
+    if (tryHandleJobIntent(player, playerSpeech)) {
+      return;
+    }
+
     if (isCoolingDown(player.getUniqueId())) {
       return;
     }
@@ -93,7 +100,6 @@ public class ChatListener implements Listener {
     String identityStr = isMaster ? "主人" : "其他玩家";
 
     String systemPrompt = plugin.getSystemPrompt();
-    String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
     if (playerSpeech.isBlank()) {
       playerSpeech = "正在呼唤你，请自然回应。";
     }
@@ -150,6 +156,75 @@ public class ChatListener implements Listener {
                         Bukkit.broadcast(replyComponent);
                       });
             });
+  }
+
+  private boolean tryHandleJobIntent(Player player, String playerSpeech) {
+    String normalized = normalizeIntentText(playerSpeech);
+    if (normalized.isBlank()) {
+      return false;
+    }
+
+    IntentAction action = detectIntent(normalized);
+    if (action == null) {
+      return false;
+    }
+
+    if (!canControl(player)) {
+      player.sendMessage(Component.text("只有主人或管理员可以让女仆执行工作。", NamedTextColor.RED));
+      return true;
+    }
+
+    JobActionResult result =
+        switch (action) {
+          case FISHING_START ->
+              plugin.getJobService().startFishing(player, MaidAnchorService.DEFAULT_NAME);
+          case CHUNK_KEEPER_START ->
+              plugin.getJobService().startChunkKeeper(player, MaidAnchorService.DEFAULT_NAME);
+          case HARVEST_START ->
+              plugin.getJobService().startHarvest(player, MaidAnchorService.DEFAULT_NAME);
+          case JOB_STOP -> plugin.getJobService().stopActiveJob("job 已通过聊天停止。");
+        };
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+    return true;
+  }
+
+  private IntentAction detectIntent(String normalized) {
+    if (containsAny(normalized, "停止工作", "停下工作", "别忙了", "休息一下")) {
+      return IntentAction.JOB_STOP;
+    }
+    if (containsAny(normalized, "去钓鱼", "开始钓鱼", "钓鱼去", "帮我钓鱼")) {
+      return IntentAction.FISHING_START;
+    }
+    if (containsAny(normalized, "看住机器", "看着机器", "守住机器", "守机器", "看红石", "看住红石")) {
+      return IntentAction.CHUNK_KEEPER_START;
+    }
+    if (containsAny(normalized, "收一下农田", "收农田", "收割农田", "收成熟作物", "收一下作物")) {
+      return IntentAction.HARVEST_START;
+    }
+    return null;
+  }
+
+  private boolean canControl(Player player) {
+    return player.hasPermission("craftmaid.admin")
+        || player.getName().equalsIgnoreCase(plugin.getMasterName());
+  }
+
+  private boolean containsAny(String text, String... candidates) {
+    for (String candidate : candidates) {
+      if (text.contains(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private String normalizeIntentText(String text) {
+    if (text == null) {
+      return "";
+    }
+    return text.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
   }
 
   private void triggerMemoryCompression(UUID playerId, LlmClient client) {
@@ -236,6 +311,13 @@ public class ChatListener implements Listener {
 
     nextAllowedReplyAt.put(playerId, now + cooldownSeconds * 1000L);
     return false;
+  }
+
+  private enum IntentAction {
+    FISHING_START,
+    CHUNK_KEEPER_START,
+    HARVEST_START,
+    JOB_STOP
   }
 
   private String rootMessage(Throwable throwable) {

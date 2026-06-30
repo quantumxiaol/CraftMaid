@@ -6,6 +6,9 @@ import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.interaction.CitizensMaidInteractionListener;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.Trait;
@@ -286,6 +289,39 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean startFishingAnimation(Location target) {
+    if (target == null
+        || target.getWorld() == null
+        || !plugin.getServer().getPluginManager().isPluginEnabled("Denizen")) {
+      return false;
+    }
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    String targetText =
+        String.format(
+            Locale.ROOT,
+            "%.1f,%.1f,%.1f,%s",
+            target.getX(),
+            target.getY(),
+            target.getZ(),
+            target.getWorld().getName());
+    boolean selected =
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc select " + npc.getId());
+    boolean started = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc fish " + targetText);
+    return selected && started;
+  }
+
+  @Override
+  public void stopFishingAnimation() {
+    if (plugin.getServer().getPluginManager().isPluginEnabled("Denizen")) {
+      Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc stopfishing");
+    }
+  }
+
+  @Override
   public boolean openInventory(Player player) {
     NPC npc = ensureSpawnedNear(player);
     if (npc == null) {
@@ -301,19 +337,67 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (item == null || item.getType() == Material.AIR || item.getAmount() <= 0) {
       return InventoryInsertResult.success("没有需要放入女仆背包的物品。");
     }
+    return addInventoryItemsAllOrNothing(List.of(item));
+  }
 
+  @Override
+  public boolean canFitInventoryItems(Collection<ItemStack> items) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    Inventory inventory = npc.getOrAddTrait(Inventory.class);
+    ItemStack[] contents = inventory.getContents();
+    return fitItems(copyContents(contents), items);
+  }
+
+  @Override
+  public InventoryInsertResult addInventoryItemsAllOrNothing(Collection<ItemStack> items) {
     NPC npc = getStoredNpcOrNull();
     if (npc == null) {
       return InventoryInsertResult.failure("还没有已记录的女仆 NPC。");
     }
 
     Inventory inventory = npc.getOrAddTrait(Inventory.class);
-    ItemStack incoming = item.clone();
-    ItemStack[] contents = inventory.getContents();
-    if (contents == null || contents.length == 0) {
-      contents = new ItemStack[36];
+    ItemStack[] candidate = copyContents(inventory.getContents());
+    if (!fitItems(candidate, items)) {
+      return InventoryInsertResult.failure("女仆背包空间不足。");
     }
+    inventory.setContents(candidate);
+    return InventoryInsertResult.success("已放入女仆背包。");
+  }
 
+  private ItemStack[] copyContents(ItemStack[] contents) {
+    ItemStack[] copy =
+        contents == null || contents.length == 0
+            ? new ItemStack[36]
+            : new ItemStack[contents.length];
+    if (contents == null) {
+      return copy;
+    }
+    for (int i = 0; i < contents.length; i++) {
+      copy[i] = contents[i] == null ? null : contents[i].clone();
+    }
+    return copy;
+  }
+
+  private boolean fitItems(ItemStack[] contents, Collection<ItemStack> items) {
+    if (items == null || items.isEmpty()) {
+      return true;
+    }
+    for (ItemStack item : items) {
+      if (item == null || item.getType() == Material.AIR || item.getAmount() <= 0) {
+        continue;
+      }
+      if (!fitItem(contents, item.clone())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private boolean fitItem(ItemStack[] contents, ItemStack incoming) {
     int remaining = incoming.getAmount();
     int maxStackSize = Math.max(1, incoming.getMaxStackSize());
     for (int slot = 0; slot < contents.length && remaining > 0; slot++) {
@@ -341,15 +425,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       contents[slot] = placed;
       remaining -= added;
     }
-
-    inventory.setContents(contents);
-    if (remaining <= 0) {
-      return InventoryInsertResult.success("已放入女仆背包。");
-    }
-
-    ItemStack leftover = incoming.clone();
-    leftover.setAmount(remaining);
-    return InventoryInsertResult.partial(leftover, "女仆背包空间不足。");
+    return remaining <= 0;
   }
 
   @Override
@@ -431,15 +507,32 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
 
+    return configureSentinelGuard(npc, npc.getStoredLocation(), "守卫");
+  }
+
+  @Override
+  public boolean startGuardingAt(Location location) {
+    if (location == null || location.getWorld() == null) {
+      return false;
+    }
+    NPC npc = ensureSpawnedAt(location);
+    if (npc == null || !isGuardAvailable()) {
+      return false;
+    }
+    npc.getNavigator().setTarget(location);
+    return configureSentinelGuard(npc, location, "定点守卫");
+  }
+
+  private boolean configureSentinelGuard(NPC npc, Location guardLocation, String label) {
     try {
       Object trait = getSentinelTrait(npc);
-      setField(trait, "spawnPoint", npc.getStoredLocation());
+      setField(trait, "spawnPoint", guardLocation.clone());
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       configureSentinelCombat(trait);
       guarding = true;
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
-      plugin.getLogger().warning("启动 Sentinel 守卫失败: " + rootMessage(ex));
+      plugin.getLogger().warning("启动 Sentinel " + label + "失败: " + rootMessage(ex));
       return false;
     }
   }

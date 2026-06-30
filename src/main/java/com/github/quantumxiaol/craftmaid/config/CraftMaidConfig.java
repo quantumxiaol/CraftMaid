@@ -7,6 +7,7 @@ public record CraftMaidConfig(
     MaidSettings maid,
     ChatSettings chat,
     ConversationSettings conversation,
+    JobSettings jobs,
     String systemPrompt) {
   private static final String DEFAULT_SYSTEM_PROMPT =
       "你是 Minecraft 里的一名可爱女仆，请始终用简短、乖巧的语气用{language}回复。你的主人是{master}，你的名字是{name}。不要打破第四面墙，表现出你真实地生活在 Minecraft 的世界中。";
@@ -57,11 +58,29 @@ public record CraftMaidConfig(
             plugin.getConfig().getBoolean("conversation.persist.enabled", false),
             getConfigString(plugin, "conversation.persist.file", "conversations.json"));
 
+    JobSettings jobs =
+        new JobSettings(
+            new FishingSettings(
+                Math.max(20, plugin.getConfig().getInt("jobs.fishing.min_wait_ticks", 100)),
+                Math.max(20, plugin.getConfig().getInt("jobs.fishing.max_wait_ticks", 240)),
+                Math.max(0.0, plugin.getConfig().getDouble("jobs.fishing.fish_weight", 72.0)),
+                Math.max(0.0, plugin.getConfig().getDouble("jobs.fishing.junk_weight", 23.0)),
+                Math.max(0.0, plugin.getConfig().getDouble("jobs.fishing.treasure_weight", 5.0)),
+                plugin.getConfig().getBoolean("jobs.fishing.treasure_enabled", true),
+                plugin.getConfig().getBoolean("jobs.fishing.denizen_animation", false)),
+            new ChunkKeeperSettings(
+                Math.max(0, plugin.getConfig().getInt("jobs.chunk_keeper.radius_chunks", 0)),
+                plugin.getConfig().getBoolean("jobs.chunk_keeper.guard_with_sentinel", false)),
+            new HarvestSettings(
+                Math.max(1, plugin.getConfig().getInt("jobs.harvest.max_region_volume", 4096)),
+                Math.max(1, plugin.getConfig().getInt("jobs.harvest.max_blocks_per_tick", 4)),
+                Math.max(1, plugin.getConfig().getInt("jobs.harvest.max_blocks_per_run", 128))));
+
     String rawSystemPrompt =
         plugin.getConfig().getString("maid.system_prompt", DEFAULT_SYSTEM_PROMPT);
     String systemPrompt = renderSystemPrompt(rawSystemPrompt, maid);
 
-    return new CraftMaidConfig(llm, maid, chat, conversation, systemPrompt);
+    return new CraftMaidConfig(llm, maid, chat, conversation, jobs, systemPrompt);
   }
 
   private static String getConfigString(JavaPlugin plugin, String path, String defaultValue) {
@@ -117,4 +136,20 @@ public record CraftMaidConfig(
       double summaryTemperature,
       boolean persistEnabled,
       String persistFile) {}
+
+  public record JobSettings(
+      FishingSettings fishing, ChunkKeeperSettings chunkKeeper, HarvestSettings harvest) {}
+
+  public record FishingSettings(
+      int minWaitTicks,
+      int maxWaitTicks,
+      double fishWeight,
+      double junkWeight,
+      double treasureWeight,
+      boolean treasureEnabled,
+      boolean denizenAnimation) {}
+
+  public record ChunkKeeperSettings(int radiusChunks, boolean guardWithSentinel) {}
+
+  public record HarvestSettings(int maxRegionVolume, int maxBlocksPerTick, int maxBlocksPerRun) {}
 }

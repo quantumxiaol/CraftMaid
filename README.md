@@ -16,8 +16,11 @@ CraftMaid 分成两层能力。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
 * **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
-* **Job 框架骨架**：可以查看 `idle` / `fishing` / `following` / `guarding` 状态，并通过命令停止当前工作。
-* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；背包满会自动停止。
+* **Job 框架骨架**：统一 `MaidJob` / `activeJob` / `JobPhase`，可以查看 `idle` / `fishing` / `chunk_keeper` / `harvest` / `following` / `guarding` 状态，并通过命令或菜单停止当前工作。
+* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。
+* **ChunkKeeper MVP**：读取 `redstone_watch/<name>`，使用 Paper `addPluginChunkTicket` 保持机器所在 chunk 加载；停止 job 或插件关闭时释放 ticket。
+* **农田收割 MVP**：读取 `farm/<name>`，只处理成熟的白名单 `Ageable` 作物；每 tick 限流，产物以 all-or-nothing 方式进入女仆背包，背包满时停止且不改当前方块。
+* **轻量自然语言 intent**：主人可以说“露西，去钓鱼 / 看住机器 / 收农田 / 停止工作”触发对应安全动作。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
 * **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标；跟随速度可通过 `maid.follow.speed` 调整，默认 `1.35`。
@@ -29,7 +32,7 @@ CraftMaid 分成两层能力。
 * **Denizen 行为**：`plugin.yml` 已经 `softdepend` Denizen，但当前没有真正调用 Denizen API 或脚本。
 * **真实鱼钩/Denizen 钓鱼**：当前钓鱼是 CraftMaid 内置模拟产出，还没有接 Denizen `/npc fish`，也没有生成原版 `FishHook` 实体。
 * **自动找水域**：钓鱼需要先设置 `region pond/<name>`，暂时不会自动扫描附近水域。
-* **家务系统**：还没有箱子整理、成熟农作物收割补种、鱼塘、红石机器巡检或区块加载。
+* **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
 * **自然语言动作执行**：LLM 目前只输出聊天文本；“露西，跟着我”还不会自动转换成 `FOLLOW_START`。
 * **跟随细节**：当前是第一版，还没有 `follow_distance`、`start_distance`、`teleport_distance`、跨世界处理、卡住恢复或重载后继续跟随。
@@ -157,6 +160,22 @@ conversation:
   persist:
     enabled: false # true 时保存到 plugins/CraftMaid/conversations.json
     file: "conversations.json"
+jobs:
+  fishing:
+    min_wait_ticks: 100
+    max_wait_ticks: 240
+    fish_weight: 72.0
+    junk_weight: 23.0
+    treasure_weight: 5.0
+    treasure_enabled: true
+    denizen_animation: false # 可选 Denizen 表演层，不改变 CraftMaid 产出控制
+  chunk_keeper:
+    radius_chunks: 0
+    guard_with_sentinel: false
+  harvest:
+    max_region_volume: 4096
+    max_blocks_per_tick: 4
+    max_blocks_per_run: 128
 ```
 修改完成后，在游戏中输入 `/craftmaid reload` 即可热重载配置。
 
@@ -182,7 +201,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.speed`、`maid.combat`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.speed`、`maid.combat`、`conversation.summary.max_tokens`、`conversation.summary.temperature` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -212,9 +231,11 @@ conversation:
 * 停止工作（停止当前 job、跟随或护卫）
 * 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
 * 去钓鱼（使用 `fishing_spot/default` 和 `pond/default`）
+* 看住机器（使用 `redstone_watch/default` 加载 chunk）
+* 收农田（使用 `farm/default` 收割成熟作物）
 * 关闭菜单
 
-“打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼”会启动 CraftMaid 内置模拟钓鱼 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
+“打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
 
 anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田、箱子和红石机器工作还只是数据准备。
 
@@ -256,9 +277,13 @@ Job 状态和钓鱼控制：
 /craftmaid job stop
 /craftmaid fishing start main
 /craftmaid fishing stop
+/craftmaid chunk start iron_farm
+/craftmaid chunk stop
+/craftmaid harvest start wheat_field
+/craftmaid harvest stop
 ```
 
-`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。如果省略名称，命令默认使用 `main`；右键菜单里的“去钓鱼”默认使用 `default`。开始钓鱼会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。
+`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 默认使用 `default`。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。
 
 `anchors.yml` 大致结构如下：
 

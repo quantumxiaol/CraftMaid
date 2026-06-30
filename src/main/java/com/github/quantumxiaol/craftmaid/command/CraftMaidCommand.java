@@ -24,11 +24,15 @@ public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
       List.of(
           "help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region", "job",
-          "fishing");
+          "fishing", "chunk", "harvest");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
   private static final List<String> JOB_ACTIONS = List.of("status", "stop");
   private static final List<String> FISHING_ACTIONS = List.of("start", "stop");
+  private static final List<String> CHUNK_ACTIONS = List.of("start", "stop");
+  private static final List<String> HARVEST_ACTIONS = List.of("start", "stop");
   private static final List<String> FISHING_NAMES = List.of("main", "default");
+  private static final List<String> CHUNK_NAMES = List.of("main", "default", "iron_farm");
+  private static final List<String> HARVEST_NAMES = List.of("main", "default", "wheat_field");
   private static final List<String> ANCHOR_ACTIONS = List.of("set", "list", "remove");
   private static final List<String> ANCHOR_TYPES =
       List.of("home", "fishing_spot", "chest", "guard_post", "redstone_watch");
@@ -102,6 +106,14 @@ public class CraftMaidCommand implements TabExecutor {
         handleFishing(sender, args);
         return true;
       }
+      case "chunk" -> {
+        handleChunk(sender, args);
+        return true;
+      }
+      case "harvest" -> {
+        handleHarvest(sender, args);
+        return true;
+      }
       default -> {
         sender.sendMessage(
             Component.text("未知子命令，输入 /" + label + " help 查看用法。", NamedTextColor.RED));
@@ -140,11 +152,35 @@ public class CraftMaidCommand implements TabExecutor {
       return filter(FISHING_ACTIONS, prefix);
     }
 
+    if (args.length == 2 && args[0].equalsIgnoreCase("chunk")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return filter(CHUNK_ACTIONS, prefix);
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("harvest")) {
+      String prefix = args[1].toLowerCase(Locale.ROOT);
+      return filter(HARVEST_ACTIONS, prefix);
+    }
+
     if (args.length == 3
         && args[0].equalsIgnoreCase("fishing")
         && args[1].equalsIgnoreCase("start")) {
       String prefix = args[2].toLowerCase(Locale.ROOT);
       return filter(FISHING_NAMES, prefix);
+    }
+
+    if (args.length == 3
+        && args[0].equalsIgnoreCase("chunk")
+        && args[1].equalsIgnoreCase("start")) {
+      String prefix = args[2].toLowerCase(Locale.ROOT);
+      return filter(CHUNK_NAMES, prefix);
+    }
+
+    if (args.length == 3
+        && args[0].equalsIgnoreCase("harvest")
+        && args[1].equalsIgnoreCase("start")) {
+      String prefix = args[2].toLowerCase(Locale.ROOT);
+      return filter(HARVEST_NAMES, prefix);
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("anchor")) {
@@ -290,7 +326,7 @@ public class CraftMaidCommand implements TabExecutor {
 
     switch (args[1].toLowerCase(Locale.ROOT)) {
       case "start" -> {
-        plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始跟随。");
+        plugin.getJobService().stopActiveJobForExternalControl("当前工作停止：玩家开始跟随。");
         if (!maidNpcService.startFollowing(player)) {
           sender.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
           return;
@@ -343,6 +379,72 @@ public class CraftMaidCommand implements TabExecutor {
           sender.sendMessage(
               Component.text("用法: /craftmaid fishing <start|stop> [name]", NamedTextColor.YELLOW));
     }
+  }
+
+  private void handleChunk(CommandSender sender, String[] args) {
+    if (args.length < 2) {
+      sender.sendMessage(
+          Component.text("用法: /craftmaid chunk <start|stop> [name]", NamedTextColor.YELLOW));
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "start" -> startChunkKeeper(sender, args);
+      case "stop" -> {
+        JobActionResult result = plugin.getJobService().stopChunkKeeper("看守机器任务已手动停止。");
+        sender.sendMessage(
+            Component.text(
+                result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+      }
+      default ->
+          sender.sendMessage(
+              Component.text("用法: /craftmaid chunk <start|stop> [name]", NamedTextColor.YELLOW));
+    }
+  }
+
+  private void startChunkKeeper(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以启动看守机器任务。", NamedTextColor.RED));
+      return;
+    }
+    String name = args.length >= 3 ? args[2] : "main";
+    JobActionResult result = plugin.getJobService().startChunkKeeper(player, name);
+    sender.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+  }
+
+  private void handleHarvest(CommandSender sender, String[] args) {
+    if (args.length < 2) {
+      sender.sendMessage(
+          Component.text("用法: /craftmaid harvest <start|stop> [name]", NamedTextColor.YELLOW));
+      return;
+    }
+
+    switch (args[1].toLowerCase(Locale.ROOT)) {
+      case "start" -> startHarvest(sender, args);
+      case "stop" -> {
+        JobActionResult result = plugin.getJobService().stopHarvest("收割任务已手动停止。");
+        sender.sendMessage(
+            Component.text(
+                result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+      }
+      default ->
+          sender.sendMessage(
+              Component.text("用法: /craftmaid harvest <start|stop> [name]", NamedTextColor.YELLOW));
+    }
+  }
+
+  private void startHarvest(CommandSender sender, String[] args) {
+    if (!(sender instanceof Player player)) {
+      sender.sendMessage(Component.text("只有玩家可以启动收割任务。", NamedTextColor.RED));
+      return;
+    }
+    String name = args.length >= 3 ? args[2] : "main";
+    JobActionResult result = plugin.getJobService().startHarvest(player, name);
+    sender.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
   }
 
   private void startFishing(CommandSender sender, String[] args) {
@@ -552,6 +654,12 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(
         Component.text("/" + label + " fishing <start|stop> [name]", NamedTextColor.YELLOW)
             .append(Component.text(" - 启动或停止模拟钓鱼", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " chunk <start|stop> [name]", NamedTextColor.YELLOW)
+            .append(Component.text(" - 加载或停止 redstone_watch 附近 chunk", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " harvest <start|stop> [name]", NamedTextColor.YELLOW)
+            .append(Component.text(" - 启动或停止农田收割", NamedTextColor.GRAY)));
     sender.sendMessage(
         Component.text("/" + label + " anchor <set|list|remove>", NamedTextColor.YELLOW)
             .append(Component.text(" - 管理命名单点 anchor", NamedTextColor.GRAY)));

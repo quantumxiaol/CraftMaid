@@ -6,7 +6,7 @@ softdepend: [Citizens, Sentinel, Denizen]
 commands:
   craftmaid:
     description: "管理 CraftMaid 女仆插件"
-    usage: "/<command> [help|spawn|despawn|reload|forget|follow|job|fishing|anchor|region]"
+    usage: "/<command> [help|spawn|despawn|reload|forget|follow|job|fishing|chunk|harvest|anchor|region]"
     aliases: [maid]
     permission: craftmaid.admin
     permission-message: "你没有权限执行此命令。"

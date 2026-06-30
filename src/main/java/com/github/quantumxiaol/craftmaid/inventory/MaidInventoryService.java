@@ -1,6 +1,9 @@
 package com.github.quantumxiaol.craftmaid.inventory;
 
 import com.github.quantumxiaol.craftmaid.CraftMaid;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 
@@ -15,7 +18,34 @@ public final class MaidInventoryService {
     if (item == null || item.getType() == Material.AIR || item.getAmount() <= 0) {
       return InventoryInsertResult.success("没有需要放入女仆背包的物品。");
     }
-    return plugin.getMaidNpcService().addInventoryItem(item.clone());
+    return addAllOrNothing(List.of(item));
+  }
+
+  public boolean canFitAll(Collection<ItemStack> items) {
+    List<ItemStack> normalized = normalizedItems(items);
+    return normalized.isEmpty() || plugin.getMaidNpcService().canFitInventoryItems(normalized);
+  }
+
+  public InventoryInsertResult addAllOrNothing(Collection<ItemStack> items) {
+    List<ItemStack> normalized = normalizedItems(items);
+    if (normalized.isEmpty()) {
+      return InventoryInsertResult.success("没有需要放入女仆背包的物品。");
+    }
+    return plugin.getMaidNpcService().addInventoryItemsAllOrNothing(normalized);
+  }
+
+  private List<ItemStack> normalizedItems(Collection<ItemStack> items) {
+    List<ItemStack> normalized = new ArrayList<>();
+    if (items == null) {
+      return normalized;
+    }
+    for (ItemStack item : items) {
+      if (item == null || item.getType() == Material.AIR || item.getAmount() <= 0) {
+        continue;
+      }
+      normalized.add(item.clone());
+    }
+    return normalized;
   }
 
   public record InventoryInsertResult(boolean success, ItemStack leftover, String message) {

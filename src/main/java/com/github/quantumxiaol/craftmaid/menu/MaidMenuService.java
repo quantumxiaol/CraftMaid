@@ -199,6 +199,22 @@ public final class MaidMenuService implements Listener {
         Material.FISHING_ROD,
         "去钓鱼",
         "使用 fishing_spot/default 和 pond/default。");
+    setActionItem(
+        holder,
+        inventory,
+        36,
+        MaidMenuAction.CHUNK_KEEPER_START,
+        Material.CLOCK,
+        "看住机器",
+        "使用 redstone_watch/default 加载机器区块。");
+    setActionItem(
+        holder,
+        inventory,
+        37,
+        MaidMenuAction.HARVEST_START,
+        Material.WHEAT,
+        "收农田",
+        "使用 farm/default 收割成熟作物。");
     setActionItem(holder, inventory, 40, MaidMenuAction.CLOSE, Material.BARRIER, "关闭", "关闭菜单。");
 
     player.openInventory(inventory);
@@ -305,6 +321,8 @@ public final class MaidMenuService implements Listener {
       case GUARD_STOP -> stopGuarding(player);
       case GUARD_HERE -> startGuardingHere(player);
       case FISHING_START -> startFishing(player);
+      case CHUNK_KEEPER_START -> startChunkKeeper(player);
+      case HARVEST_START -> startHarvest(player);
       case CLOSE -> player.closeInventory();
     }
   }
@@ -357,7 +375,7 @@ public final class MaidMenuService implements Listener {
                     NamedTextColor.WHITE)));
     player.sendMessage(
         Component.text("- " + plugin.getJobService().statusLine(), NamedTextColor.GRAY));
-    player.sendMessage(Component.text("- 家务：尚未接入", NamedTextColor.YELLOW));
+    player.sendMessage(Component.text("- 工作：钓鱼 / 看机器 / 收农田", NamedTextColor.GRAY));
   }
 
   private void sendAnchorStatus(Player player) {
@@ -519,7 +537,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始跟随。");
+    plugin.getJobService().stopActiveJobForExternalControl("当前工作停止：玩家开始跟随。");
     boolean started = plugin.getMaidNpcService().startFollowing(player);
     if (!started) {
       player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
@@ -555,7 +573,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
-    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始护卫。");
+    plugin.getJobService().stopJobsForGuarding("当前工作停止：玩家开始护卫。");
     boolean started = plugin.getMaidNpcService().startGuarding(player);
     if (!started) {
       player.sendMessage(Component.text("启动护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
@@ -586,7 +604,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
-    plugin.getJobService().stopFishingForExternalControl("钓鱼任务停止：玩家开始守卫。");
+    plugin.getJobService().stopJobsForGuarding("当前工作停止：玩家开始守卫。");
     boolean started = plugin.getMaidNpcService().startGuardingHere(player);
     if (!started) {
       player.sendMessage(Component.text("启动守卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
@@ -602,6 +620,30 @@ public final class MaidMenuService implements Listener {
     }
     JobActionResult result =
         plugin.getJobService().startFishing(player, MaidAnchorService.DEFAULT_NAME);
+    player.closeInventory();
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+  }
+
+  private void startChunkKeeper(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    JobActionResult result =
+        plugin.getJobService().startChunkKeeper(player, MaidAnchorService.DEFAULT_NAME);
+    player.closeInventory();
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+  }
+
+  private void startHarvest(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    JobActionResult result =
+        plugin.getJobService().startHarvest(player, MaidAnchorService.DEFAULT_NAME);
     player.closeInventory();
     player.sendMessage(
         Component.text(

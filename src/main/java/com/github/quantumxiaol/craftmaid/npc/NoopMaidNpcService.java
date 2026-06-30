@@ -2,6 +2,7 @@ package com.github.quantumxiaol.craftmaid.npc;
 
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
+import java.util.Collection;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -102,12 +103,30 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean startFishingAnimation(Location target) {
+    return false;
+  }
+
+  @Override
+  public void stopFishingAnimation() {}
+
+  @Override
   public boolean openInventory(Player player) {
     return false;
   }
 
   @Override
   public InventoryInsertResult addInventoryItem(ItemStack item) {
+    return InventoryInsertResult.failure("未安装或未启用 Citizens，无法写入女仆背包。");
+  }
+
+  @Override
+  public boolean canFitInventoryItems(Collection<ItemStack> items) {
+    return false;
+  }
+
+  @Override
+  public InventoryInsertResult addInventoryItemsAllOrNothing(Collection<ItemStack> items) {
     return InventoryInsertResult.failure("未安装或未启用 Citizens，无法写入女仆背包。");
   }
 
@@ -138,6 +157,11 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean startGuardingHere(Player player) {
+    return false;
+  }
+
+  @Override
+  public boolean startGuardingAt(Location location) {
     return false;
   }
 
