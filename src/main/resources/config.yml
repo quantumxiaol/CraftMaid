@@ -44,14 +44,23 @@ chat:
   max_context_entities: 8
   reply_prefix: "[{name}] "
 intent:
-  # 有限自然语言意图：不调用 LLM tool call，只把少量固定说法映射到现有 JobService。
+  # 有限自然语言意图：由同一个 LLM 输出 JSON action plan，再由 Java 白名单执行；不是开放式 tool call。
   enabled: true
   # true 时只有 maid.master 或 craftmaid.admin 可以用聊天触发工作。
   master_only: true
-  # true 时命中工作意图后不再请求 LLM；false 时会执行动作后继续普通聊天。
+  # 规则 fallback 使用；LLM JSON 模式下有 action 时总会先执行，再生成最终回复。
   consume_on_match: true
   # true 时 followup_seconds 窗口内不带女仆名字也能触发工作意图。
   allow_followup_window: true
+  # true 时普通聊天和工作控制统一走 JSON：{chat, actions}。
+  llm_json: true
+  # DeepSeek 和 OpenAI GPT 可用；不兼容接口会自动重试不带 response_format，并在本次运行中降级。
+  response_format_json_object: true
+  # 这里限制的是模型输出 token，不限制输入里的 system prompt / 历史 / 环境上下文。
+  plan_max_tokens: 512
+  plan_temperature: 0.2
+  final_max_tokens: 320
+  final_temperature: 0.6
 conversation:
   enabled: true
   # 发送给 LLM 的历史消息上限，不包含 system。超过后会压缩为 Memory，并只保留最近 N/5 条原始历史。

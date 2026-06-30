@@ -3,6 +3,7 @@ package com.github.quantumxiaol.craftmaid.npc;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import java.util.Collection;
+import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -58,6 +59,8 @@ public interface MaidNpcService {
   boolean canFitInventoryItems(Collection<ItemStack> items);
 
   InventoryInsertResult addInventoryItemsAllOrNothing(Collection<ItemStack> items);
+
+  List<ItemStack> getInventoryContents();
 
   MaidEquipment getEquipment();
 

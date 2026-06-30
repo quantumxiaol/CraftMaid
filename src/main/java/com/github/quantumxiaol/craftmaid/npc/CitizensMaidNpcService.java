@@ -368,6 +368,24 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     return InventoryInsertResult.success("已放入女仆背包。");
   }
 
+  @Override
+  public List<ItemStack> getInventoryContents() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return List.of();
+    }
+
+    Inventory inventory = npc.getOrAddTrait(Inventory.class);
+    ItemStack[] contents = inventory.getContents();
+    if (contents == null || contents.length == 0) {
+      return List.of();
+    }
+
+    return java.util.Arrays.stream(contents)
+        .map(item -> item == null ? null : item.clone())
+        .toList();
+  }
+
   private ItemStack[] copyContents(ItemStack[] contents) {
     ItemStack[] copy =
         contents == null || contents.length == 0

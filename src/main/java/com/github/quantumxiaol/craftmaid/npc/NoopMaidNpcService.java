@@ -3,6 +3,7 @@ package com.github.quantumxiaol.craftmaid.npc;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import java.util.Collection;
+import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -128,6 +129,11 @@ final class NoopMaidNpcService implements MaidNpcService {
   @Override
   public InventoryInsertResult addInventoryItemsAllOrNothing(Collection<ItemStack> items) {
     return InventoryInsertResult.failure("未安装或未启用 Citizens，无法写入女仆背包。");
+  }
+
+  @Override
+  public List<ItemStack> getInventoryContents() {
+    return List.of();
   }
 
   @Override

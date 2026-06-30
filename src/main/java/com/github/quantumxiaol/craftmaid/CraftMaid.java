@@ -7,6 +7,7 @@ import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService;
+import com.github.quantumxiaol.craftmaid.job.MaidJobEventBuffer;
 import com.github.quantumxiaol.craftmaid.job.MaidJobService;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
@@ -22,6 +23,7 @@ public final class CraftMaid extends JavaPlugin {
   private MaidAnchorService anchorService;
   private ConversationHistory conversationHistory;
   private MaidInventoryService maidInventoryService;
+  private MaidJobEventBuffer jobEventBuffer;
   private MaidJobService jobService;
   private MaidNpcService maidNpcService;
   private MaidMenuService maidMenuService;
@@ -35,6 +37,7 @@ public final class CraftMaid extends JavaPlugin {
     anchorService.load();
     conversationHistory = new ConversationHistory(this);
     maidInventoryService = new MaidInventoryService(this);
+    jobEventBuffer = new MaidJobEventBuffer();
     jobService = new MaidJobService(this);
     maidNpcService = MaidNpcServices.create(this);
     maidMenuService = new MaidMenuService(this);
@@ -207,6 +210,10 @@ public final class CraftMaid extends JavaPlugin {
 
   public MaidInventoryService getMaidInventoryService() {
     return maidInventoryService;
+  }
+
+  public MaidJobEventBuffer getJobEventBuffer() {
+    return jobEventBuffer;
   }
 
   public MaidJobService getJobService() {

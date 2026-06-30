@@ -74,6 +74,9 @@ final class ChunkKeeperJob implements MaidJob {
       maybeStartGuarding();
     }
     plugin
+        .getJobEventBuffer()
+        .add("开始看守红石机器 chunk_keeper/" + name + "，加载 chunk 数 " + tickets.size() + "。");
+    plugin
         .getLogger()
         .info(
             "ChunkKeeperJob started: "
@@ -137,6 +140,7 @@ final class ChunkKeeperJob implements MaidJob {
       plugin.getMaidNpcService().stopGuarding();
       guardStarted = false;
     }
+    plugin.getJobEventBuffer().add("看守红石机器 chunk_keeper/" + name + " 停止，已释放 chunk ticket。");
     plugin.getLogger().info("ChunkKeeperJob stopped: " + name);
   }
 

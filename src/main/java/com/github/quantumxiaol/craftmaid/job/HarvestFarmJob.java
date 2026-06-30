@@ -106,6 +106,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
 
     phase = JobPhase.TRAVELLING;
     task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, PERIOD_TICKS);
+    plugin.getJobEventBuffer().add("开始收割农田 harvest/" + name + "。");
     plugin.getLogger().info("HarvestFarmJob started: " + name + " farm=" + farm.shortText());
     return JobActionResult.success("已开始收割农田: " + name);
   }
@@ -127,6 +128,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
 
     if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
       phase = JobPhase.RUNNING;
+      plugin.getJobEventBuffer().add("到达 farm/" + name + "，开始扫描成熟作物。");
     }
 
     harvestTick();
@@ -297,6 +299,16 @@ final class HarvestFarmJob implements MaidJob, Runnable {
                 + harvestedBlocks
                 + " items="
                 + itemCount);
+    plugin
+        .getJobEventBuffer()
+        .add(
+            "收割任务 harvest/"
+                + name
+                + " 停止，收割 "
+                + harvestedBlocks
+                + " 个作物，放入 "
+                + itemCount
+                + " 件物品。");
   }
 
   private Location centerOf(AnchorRegion region) {

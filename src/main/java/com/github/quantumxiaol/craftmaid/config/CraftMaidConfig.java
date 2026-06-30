@@ -53,7 +53,13 @@ public record CraftMaidConfig(
             plugin.getConfig().getBoolean("intent.enabled", true),
             plugin.getConfig().getBoolean("intent.master_only", true),
             plugin.getConfig().getBoolean("intent.consume_on_match", true),
-            plugin.getConfig().getBoolean("intent.allow_followup_window", true));
+            plugin.getConfig().getBoolean("intent.allow_followup_window", true),
+            plugin.getConfig().getBoolean("intent.llm_json", true),
+            plugin.getConfig().getBoolean("intent.response_format_json_object", true),
+            Math.max(160, plugin.getConfig().getInt("intent.plan_max_tokens", 512)),
+            clamp(plugin.getConfig().getDouble("intent.plan_temperature", 0.2), 0.0, 2.0),
+            Math.max(120, plugin.getConfig().getInt("intent.final_max_tokens", 320)),
+            clamp(plugin.getConfig().getDouble("intent.final_temperature", 0.6), 0.0, 2.0));
 
     ConversationSettings conversation =
         new ConversationSettings(
@@ -136,7 +142,16 @@ public record CraftMaidConfig(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}
 
   public record IntentSettings(
-      boolean enabled, boolean masterOnly, boolean consumeOnMatch, boolean allowFollowupWindow) {}
+      boolean enabled,
+      boolean masterOnly,
+      boolean consumeOnMatch,
+      boolean allowFollowupWindow,
+      boolean llmJson,
+      boolean responseFormatJsonObject,
+      int planMaxTokens,
+      double planTemperature,
+      int finalMaxTokens,
+      double finalTemperature) {}
 
   public record ConversationSettings(
       boolean enabled,

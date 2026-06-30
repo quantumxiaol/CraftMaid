@@ -104,6 +104,7 @@ final class FishingJob implements MaidJob, Runnable {
 
     phase = JobPhase.TRAVELLING;
     task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, PERIOD_TICKS);
+    plugin.getJobEventBuffer().add("开始钓鱼任务 fishing/" + name + "。");
     plugin.getLogger().info("FishingJob started: " + name + " pond=" + pond.shortText());
     return JobActionResult.success("已开始钓鱼任务: " + name);
   }
@@ -126,6 +127,7 @@ final class FishingJob implements MaidJob, Runnable {
     if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
       phase = JobPhase.RUNNING;
       startOptionalAnimation();
+      plugin.getJobEventBuffer().add("到达 fishing_spot/" + name + "，开始钓鱼。");
       notifyOwner("女仆已到达 fishing_spot/" + name + "，开始钓鱼。");
     }
 
@@ -150,6 +152,9 @@ final class FishingJob implements MaidJob, Runnable {
     }
 
     recordCatch(lootRoll);
+    plugin
+        .getJobEventBuffer()
+        .add("钓到 " + lootName(lootRoll.item()) + " x" + lootRoll.item().getAmount() + "，已放入背包。");
     notifyOwner(
         "女仆钓到了 " + lootName(lootRoll.item()) + " x" + lootRoll.item().getAmount() + "，已放入背包。");
     plugin
@@ -209,6 +214,20 @@ final class FishingJob implements MaidJob, Runnable {
                 + junkCount
                 + " treasure="
                 + treasureCount);
+    plugin
+        .getJobEventBuffer()
+        .add(
+            "钓鱼任务 fishing/"
+                + name
+                + " 停止，累计 "
+                + catchCount
+                + " 件，鱼 "
+                + fishCount
+                + "，杂物 "
+                + junkCount
+                + "，宝藏 "
+                + treasureCount
+                + "。");
   }
 
   @Override

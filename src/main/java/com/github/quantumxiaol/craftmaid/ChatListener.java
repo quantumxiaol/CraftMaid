@@ -1,8 +1,14 @@
 package com.github.quantumxiaol.craftmaid;
 
+import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig.IntentSettings;
+import com.github.quantumxiaol.craftmaid.context.MaidRuntimeContextCollector;
 import com.github.quantumxiaol.craftmaid.context.WorldContextCollector;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
+import com.github.quantumxiaol.craftmaid.intent.MaidActionExecutionResult;
+import com.github.quantumxiaol.craftmaid.intent.MaidActionExecutor;
+import com.github.quantumxiaol.craftmaid.intent.MaidActionPlan;
+import com.github.quantumxiaol.craftmaid.intent.MaidActionPlanParser;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntent;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntentDetector;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntentExecutor;
@@ -28,6 +34,9 @@ import org.bukkit.event.Listener;
 public class ChatListener implements Listener {
   private final CraftMaid plugin;
   private final WorldContextCollector worldContextCollector = new WorldContextCollector();
+  private final MaidRuntimeContextCollector runtimeContextCollector;
+  private final MaidActionPlanParser actionPlanParser = new MaidActionPlanParser();
+  private final MaidActionExecutor actionExecutor;
   private final MaidIntentDetector intentDetector = new MaidIntentDetector();
   private final MaidIntentExecutor intentExecutor;
   private final Map<UUID, Long> nextAllowedReplyAt = new ConcurrentHashMap<>();
@@ -38,6 +47,8 @@ public class ChatListener implements Listener {
   public ChatListener(CraftMaid plugin, LlmClient llmClient) {
     this.plugin = plugin;
     this.llmClient = llmClient;
+    this.runtimeContextCollector = new MaidRuntimeContextCollector(plugin);
+    this.actionExecutor = new MaidActionExecutor(plugin);
     this.intentExecutor = new MaidIntentExecutor(plugin);
   }
 
@@ -83,11 +94,13 @@ public class ChatListener implements Listener {
     }
 
     String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
-    if (tryHandleJobIntent(player, playerSpeech, addressedByName)) {
+    IntentSettings intentSettings = plugin.getIntentSettings();
+    boolean useJsonTurn = intentSettings.enabled() && intentSettings.llmJson();
+    if (!useJsonTurn && tryHandleFallbackIntent(player, playerSpeech, addressedByName)) {
       return;
     }
 
-    if (isCoolingDown(player.getUniqueId())) {
+    if (!useJsonTurn && isCoolingDown(player.getUniqueId())) {
       return;
     }
 
@@ -98,25 +111,20 @@ public class ChatListener implements Listener {
       return;
     }
 
-    String masterName = plugin.getMasterName();
-    String environmentStr =
-        worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
-    String jobStatus = plugin.getJobService().statusLine();
-
-    boolean isMaster = player.getName().equalsIgnoreCase(masterName);
-    String identityStr = isMaster ? "主人" : "其他玩家";
-
-    String systemPrompt = plugin.getSystemPrompt();
     if (playerSpeech.isBlank()) {
       playerSpeech = "正在呼唤你，请自然回应。";
     }
+    String turnPlayerSpeech = playerSpeech;
 
-    String userPrompt =
-        String.format(
-            "当前环境：%s 当前女仆工作状态：%s 跟我说话的人是 %s (%s) 对我说：“%s”",
-            environmentStr, jobStatus, playerName, identityStr, playerSpeech);
+    if (useJsonTurn) {
+      handleJsonTurn(player, turnPlayerSpeech, client);
+      return;
+    }
+
+    String userPrompt = buildPlainChatPrompt(player, turnPlayerSpeech);
     List<ConversationMessage> conversationMessages =
         plugin.getConversationHistory().buildPromptMessages(playerId, userPrompt);
+    String systemPrompt = plugin.getSystemPrompt();
 
     client
         .askAiAsync(systemPrompt, conversationMessages)
@@ -148,7 +156,7 @@ public class ChatListener implements Listener {
 
               plugin
                   .getConversationHistory()
-                  .appendExchange(playerId, playerName, userPrompt, cleanReply);
+                  .appendExchange(playerId, playerName, turnPlayerSpeech, cleanReply);
               triggerMemoryCompression(playerId, client);
               Bukkit.getScheduler()
                   .runTask(
@@ -165,7 +173,145 @@ public class ChatListener implements Listener {
             });
   }
 
-  private boolean tryHandleJobIntent(Player player, String playerSpeech, boolean addressedByName) {
+  private void handleJsonTurn(Player player, String playerSpeech, LlmClient client) {
+    UUID playerId = player.getUniqueId();
+    String playerName = player.getName();
+    IntentSettings settings = plugin.getIntentSettings();
+    String planPrompt = buildPlanPrompt(player, playerSpeech);
+    List<ConversationMessage> conversationMessages =
+        plugin.getConversationHistory().buildPromptMessages(playerId, planPrompt);
+
+    client
+        .askJsonAsync(
+            buildJsonTurnSystemPrompt(),
+            conversationMessages,
+            settings.planMaxTokens(),
+            settings.planTemperature(),
+            settings.responseFormatJsonObject(),
+            "plan")
+        .whenComplete(
+            (rawPlan, ex) -> {
+              if (ex != null) {
+                failTurn(player, playerId, "请求动作计划失败: " + rootMessage(ex));
+                return;
+              }
+
+              Optional<MaidActionPlan> plan = actionPlanParser.parse(rawPlan);
+              if (plan.isEmpty()) {
+                failTurn(player, playerId, "女仆没有按 JSON 格式回应，请再说一次。");
+                return;
+              }
+
+              MaidActionPlan actionPlan = plan.get();
+              if (!actionPlan.hasActions()) {
+                String chat = actionPlan.chat() == null ? "" : actionPlan.chat().trim();
+                if (chat.isBlank()) {
+                  failTurn(player, playerId, "女仆没有想好该怎么回应，请再说一次。");
+                  return;
+                }
+                finishTurn(player, playerId, playerName, playerSpeech, chat, client);
+                return;
+              }
+
+              Bukkit.getScheduler()
+                  .runTask(
+                      plugin,
+                      () -> {
+                        if (!player.isOnline()) {
+                          respondingPlayers.remove(playerId);
+                          return;
+                        }
+                        MaidActionExecutionResult actionResult =
+                            actionExecutor.execute(player, actionPlan);
+                        requestFinalReply(
+                            player, playerId, playerName, playerSpeech, actionResult, client);
+                      });
+            });
+  }
+
+  private void requestFinalReply(
+      Player player,
+      UUID playerId,
+      String playerName,
+      String playerSpeech,
+      MaidActionExecutionResult actionResult,
+      LlmClient client) {
+    IntentSettings settings = plugin.getIntentSettings();
+    String finalPrompt = buildFinalPrompt(player, playerSpeech, actionResult);
+    List<ConversationMessage> conversationMessages =
+        plugin.getConversationHistory().buildPromptMessages(playerId, finalPrompt);
+    client
+        .askJsonAsync(
+            buildJsonTurnSystemPrompt(),
+            conversationMessages,
+            settings.finalMaxTokens(),
+            settings.finalTemperature(),
+            settings.responseFormatJsonObject(),
+            "final")
+        .whenComplete(
+            (rawFinal, ex) -> {
+              if (ex != null) {
+                String fallback = fallbackFinalReply(actionResult);
+                plugin.getLogger().warning("请求动作结果回复失败: " + rootMessage(ex));
+                finishTurn(player, playerId, playerName, playerSpeech, fallback, client);
+                return;
+              }
+
+              String finalChat =
+                  actionPlanParser.parse(rawFinal).map(MaidActionPlan::chat).orElse("").trim();
+              if (finalChat.isBlank()) {
+                finalChat = fallbackFinalReply(actionResult);
+              }
+              finishTurn(player, playerId, playerName, playerSpeech, finalChat, client);
+            });
+  }
+
+  private void finishTurn(
+      Player player,
+      UUID playerId,
+      String playerName,
+      String playerSpeech,
+      String cleanReply,
+      LlmClient client) {
+    respondingPlayers.remove(playerId);
+    if (!plugin.isEnabled()) {
+      return;
+    }
+    String reply = cleanReply == null ? "" : cleanReply.trim();
+    if (reply.isBlank()) {
+      return;
+    }
+
+    plugin.getConversationHistory().appendExchange(playerId, playerName, playerSpeech, reply);
+    triggerMemoryCompression(playerId, client);
+    Bukkit.getScheduler()
+        .runTask(
+            plugin,
+            () -> {
+              if (!plugin.isEnabled() || !player.isOnline()) {
+                return;
+              }
+              String prefix = plugin.getReplyPrefix().replace("{name}", plugin.getMaidName());
+              Bukkit.broadcast(Component.text(prefix + reply, NamedTextColor.LIGHT_PURPLE));
+            });
+  }
+
+  private void failTurn(Player player, UUID playerId, String message) {
+    respondingPlayers.remove(playerId);
+    plugin.getLogger().warning(message);
+    Bukkit.getScheduler()
+        .runTask(
+            plugin,
+            () -> {
+              if (player.isOnline()) {
+                player.sendMessage(
+                    Component.text(plugin.getMaidName() + " 暂时没听清，请再说一次。", NamedTextColor.RED));
+              }
+            });
+  }
+
+  private boolean tryHandleFallbackIntent(
+      Player player, String playerSpeech, boolean addressedByName) {
     if (!plugin.getIntentSettings().enabled()) {
       return false;
     }
@@ -185,6 +331,117 @@ public class ChatListener implements Listener {
               result.success() ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.RED));
     }
     return result.consumed();
+  }
+
+  private String buildPlainChatPrompt(Player player, String playerSpeech) {
+    String masterName = plugin.getMasterName();
+    String environmentStr =
+        worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
+    boolean isMaster = player.getName().equalsIgnoreCase(masterName);
+    String identityStr = isMaster ? "主人" : "其他玩家";
+    return String.format(
+        "当前环境：%s\n%s\n跟我说话的人是 %s (%s) 对我说：“%s”",
+        environmentStr,
+        runtimeContextCollector.collect(player),
+        player.getName(),
+        identityStr,
+        playerSpeech);
+  }
+
+  private String buildPlanPrompt(Player player, String playerSpeech) {
+    String masterName = plugin.getMasterName();
+    String environmentStr =
+        worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
+    boolean isMaster = player.getName().equalsIgnoreCase(masterName);
+    String identityStr = isMaster ? "主人" : "其他玩家";
+    return """
+        【本轮模式】
+        PLAN
+
+        【当前玩家】
+        玩家名：%s
+        身份：%s
+
+        【玩家原话】
+        %s
+
+        【当前环境】
+        %s
+
+        %s
+        """
+        .formatted(
+            player.getName(),
+            identityStr,
+            playerSpeech,
+            environmentStr,
+            runtimeContextCollector.collect(player));
+  }
+
+  private String buildJsonTurnSystemPrompt() {
+    return plugin.getSystemPrompt()
+        + """
+
+        【CraftMaid JSON Turn Protocol v1】
+        你每次必须只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
+        JSON 格式：
+        {
+          "chat": "要对玩家说的话；如果需要执行 actions，则必须为空字符串",
+          "actions": [
+            {"type": "ACTION_TYPE", "name": "main", "target": "current"}
+          ]
+        }
+
+        【可用 action】
+        - FISHING_START(name)
+        - FISHING_STOP(name)
+        - HARVEST_START(name)
+        - HARVEST_STOP(name)
+        - CHUNK_KEEPER_START(name)
+        - CHUNK_KEEPER_STOP(name)
+        - JOB_STOP(target=current)
+        - JOB_STATUS
+
+        规则：
+        1. 如果玩家只是闲聊、问候、提问，输出自然角色回复到 chat，actions=[]。
+        2. 如果玩家要求你开始、停止、切换工作，输出 actions，chat=""。
+        3. 如果 actions 非空，不要在 chat 中承诺已经完成；服务器会先执行 actions，再让你生成最终回复。
+        4. 只允许使用列出的 action，不要编造 action，不要输出服务器命令。
+        5. name 必须来自“可用工作配置”；如果玩家没有指定且只有一个可用配置，可以省略 name 让插件自动选择。
+        6. 如果玩家说“别钓鱼了，快去收田”，输出 JOB_STOP + HARVEST_START。
+        7. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
+        8. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
+        9. chat 最多 80 个中文字符，必须是完整句子。
+        """;
+  }
+
+  private String buildFinalPrompt(
+      Player player, String playerSpeech, MaidActionExecutionResult actionResult) {
+    return """
+        【本轮模式】
+        FINAL
+
+        【玩家原话】
+        %s
+
+        【服务器已执行的动作结果】
+        %s
+
+        【执行后的状态】
+        %s
+
+        请根据动作结果和新状态，用女仆口吻简短回复玩家。
+        这次 actions 必须为空数组，不要再请求任何 action。
+        """
+        .formatted(playerSpeech, actionResult.summary(), runtimeContextCollector.collect(player));
+  }
+
+  private String fallbackFinalReply(MaidActionExecutionResult actionResult) {
+    String summary = actionResult.summary();
+    if (summary.length() > 120) {
+      summary = summary.substring(0, 120) + "...";
+    }
+    return "主人，动作结果是：" + summary;
   }
 
   private void triggerMemoryCompression(UUID playerId, LlmClient client) {
