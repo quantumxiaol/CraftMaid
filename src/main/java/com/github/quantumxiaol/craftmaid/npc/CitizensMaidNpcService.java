@@ -29,6 +29,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private static final String SKIN_TRAIT_CLASS = "net.citizensnpcs.trait.SkinTrait";
   private static final String SENTINEL_PLUGIN = "Sentinel";
   private static final String SENTINEL_TRAIT_CLASS = "org.mcmonkey.sentinel.SentinelTrait";
+  private static final float DEFAULT_NAVIGATOR_SPEED = 1.0F;
 
   private final CraftMaid plugin;
   private BukkitTask followTask;
@@ -77,6 +78,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       plugin.saveConfig();
     }
 
+    syncConfiguredName(npc);
     applyConfiguredSkin(npc, player);
     if (npc.isSpawned()) {
       npc.despawn();
@@ -109,7 +111,18 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc == null) {
       return false;
     }
+    syncConfiguredName(npc);
     return applyConfiguredSkin(npc, fallbackPlayer);
+  }
+
+  @Override
+  public boolean syncConfiguredName() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+    syncConfiguredName(npc);
+    return true;
   }
 
   @Override
@@ -147,6 +160,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (createdNpc) {
       applyConfiguredSkin(npc, null);
     }
+    syncConfiguredName(npc);
     stopFollowing();
     if (npc.isSpawned()) {
       npc.teleport(home, PlayerTeleportEvent.TeleportCause.PLUGIN);
@@ -184,6 +198,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
     stopFollowing();
     NPC followNpc = npc;
+    configureFollowNavigation(followNpc);
     followNpc.getNavigator().setTarget(player, false);
     followTask =
         Bukkit.getScheduler()
@@ -194,6 +209,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
                     stopFollowing();
                     return;
                   }
+                  configureFollowNavigation(followNpc);
                   followNpc.getNavigator().setTarget(player, false);
                 },
                 20L,
@@ -211,6 +227,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     NPC npc = getStoredNpcOrNull();
     if (npc != null && npc.isSpawned()) {
       npc.getNavigator().cancelNavigation();
+      resetNavigatorSpeed(npc);
     }
     return true;
   }
@@ -453,6 +470,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       spawnAt(player, plugin.getMaidName());
       npc = getStoredNpcOrNull();
     }
+    if (npc != null) {
+      syncConfiguredName(npc);
+    }
     if (npc != null && !npc.isSpawned()) {
       npc.spawn(player.getLocation());
     }
@@ -467,6 +487,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       plugin.saveConfig();
       applyConfiguredSkin(npc, null);
     }
+    syncConfiguredName(npc);
     if (!npc.isSpawned()) {
       npc.spawn(location);
     }
@@ -479,6 +500,14 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return null;
     }
     return CitizensAPI.getNPCRegistry().getById(npcId);
+  }
+
+  private void configureFollowNavigation(NPC npc) {
+    npc.getNavigator().getLocalParameters().speed((float) plugin.getMaidFollowSpeed());
+  }
+
+  private void resetNavigatorSpeed(NPC npc) {
+    npc.getNavigator().getLocalParameters().speed(DEFAULT_NAVIGATOR_SPEED);
   }
 
   private boolean applyConfiguredSkin(NPC npc, Player fallbackPlayer) {
@@ -499,6 +528,16 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("设置 Citizens 皮肤失败: " + rootMessage(ex));
       return false;
+    }
+  }
+
+  private void syncConfiguredName(NPC npc) {
+    String maidName = plugin.getMaidName();
+    if (maidName == null || maidName.isBlank()) {
+      return;
+    }
+    if (!maidName.equals(npc.getName()) && !maidName.equals(npc.getRawName())) {
+      npc.setName(maidName);
     }
   }
 

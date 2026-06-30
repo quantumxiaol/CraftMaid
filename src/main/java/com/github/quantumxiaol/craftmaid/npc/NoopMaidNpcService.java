@@ -42,6 +42,11 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean syncConfiguredName() {
+    return false;
+  }
+
+  @Override
   public boolean setHomeAtMaidLocation(Player fallbackPlayer) {
     return false;
   }

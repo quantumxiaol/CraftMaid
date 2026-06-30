@@ -14,13 +14,13 @@ CraftMaid 分成两层能力。
 * **环境上下文**：对话时会采集玩家周围的时间、天气、附近实体和怪物等信息写入提示词。
 * **多轮记忆**：按玩家 UUID 管理历史；超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
-* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随和护卫控制。
+* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
 * **Job 框架骨架**：可以查看 `idle` / `fishing` / `following` / `guarding` 状态，并通过命令停止当前工作。
 * **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；背包满会自动停止。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
-* **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标。
+* **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标；跟随速度可通过 `maid.follow.speed` 调整，默认 `1.35`。
 * **Sentinel 护卫原型**：可通过菜单让女仆保护主人、停止护卫或守在当前位置；底层通过反射接 Sentinel trait，目标为怪物并避开 creeper。
 * **战斗掉落/经验处理**：护卫初始化时会打开 Sentinel 的敌怪掉落；默认开启 NPC 击杀经验补偿，但它依赖插件识别最后一击来源，不等同于原版玩家击杀。
 
@@ -132,6 +132,8 @@ maid:
   master: "PlayerName" # 你的游戏 ID，女仆会对该玩家展现主人的态度
   language: "中文"
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
+  follow:
+    speed: 1.35 # Citizens Navigator 默认速度是 1.0；这里只影响跟随赶路
   combat:
     enemy_drops: true # Sentinel 护卫击杀敌怪时允许掉落物
     enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时尝试补基础经验
@@ -180,7 +182,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果你的服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.combat`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.speed`、`maid.combat`、`conversation.summary.max_tokens` 和 `conversation.summary.temperature`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -207,6 +209,7 @@ conversation:
 * 设置 farm/default、pond/default、redstone/default 的两个角点
 * 设置 redstone_watch/default
 * 跟随我 / 别跟了
+* 停止工作（停止当前 job、跟随或护卫）
 * 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
 * 去钓鱼（使用 `fishing_spot/default` 和 `pond/default`）
 * 关闭菜单

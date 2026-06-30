@@ -27,6 +27,7 @@ public final class CitizensMaidInteractionListener implements Listener {
     }
 
     event.setCancelled(true);
+    maidNpcService.syncConfiguredName();
     Bukkit.getScheduler().runTask(plugin, () -> menuService.openFor(event.getClicker()));
   }
 }

@@ -145,6 +145,10 @@ public final class CraftMaid extends JavaPlugin {
     return config.maid().defaultEnemyExp();
   }
 
+  public double getMaidFollowSpeed() {
+    return config.maid().followSpeed();
+  }
+
   public String getSystemPrompt() {
     return config.systemPrompt();
   }

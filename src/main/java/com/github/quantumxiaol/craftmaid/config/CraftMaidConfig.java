@@ -36,7 +36,8 @@ public record CraftMaidConfig(
             getConfigString(plugin, "maid.skin", "master"),
             plugin.getConfig().getBoolean("maid.combat.enemy_drops", true),
             plugin.getConfig().getBoolean("maid.combat.enemy_exp", true),
-            Math.max(0, plugin.getConfig().getInt("maid.combat.default_enemy_exp", 5)));
+            Math.max(0, plugin.getConfig().getInt("maid.combat.default_enemy_exp", 5)),
+            clamp(plugin.getConfig().getDouble("maid.follow.speed", 1.35), 0.1, 3.0));
 
     ChatSettings chat =
         new ChatSettings(
@@ -101,7 +102,8 @@ public record CraftMaidConfig(
       String skin,
       boolean enemyDrops,
       boolean enemyExp,
-      int defaultEnemyExp) {}
+      int defaultEnemyExp,
+      double followSpeed) {}
 
   public record ChatSettings(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}

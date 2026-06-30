@@ -98,6 +98,14 @@ public final class MaidMenuService implements Listener {
     setActionItem(
         holder,
         inventory,
+        21,
+        MaidMenuAction.JOB_STOP,
+        Material.REDSTONE_BLOCK,
+        "停止工作",
+        "停止当前 job、跟随或护卫。");
+    setActionItem(
+        holder,
+        inventory,
         27,
         MaidMenuAction.SET_FISHING_SPOT,
         Material.WATER_BUCKET,
@@ -292,6 +300,7 @@ public final class MaidMenuService implements Listener {
           setRegionCornerAtPlayer(player, RegionType.REDSTONE, RegionCorner.POS2);
       case FOLLOW_START -> startFollowing(player);
       case FOLLOW_STOP -> stopFollowing(player);
+      case JOB_STOP -> stopActiveJob(player);
       case GUARD_START -> startGuarding(player);
       case GUARD_STOP -> stopGuarding(player);
       case GUARD_HERE -> startGuardingHere(player);
@@ -527,6 +536,17 @@ public final class MaidMenuService implements Listener {
     plugin.getMaidNpcService().stopFollowing();
     player.closeInventory();
     player.sendMessage(Component.text(plugin.getMaidName() + " 会留在这里。", NamedTextColor.GREEN));
+  }
+
+  private void stopActiveJob(Player player) {
+    if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
+      return;
+    }
+    JobActionResult result = plugin.getJobService().stopActiveJob("job 已手动停止。");
+    player.closeInventory();
+    player.sendMessage(
+        Component.text(
+            result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
   }
 
   private void startGuarding(Player player) {

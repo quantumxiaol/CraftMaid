@@ -22,6 +22,8 @@ public interface MaidNpcService {
 
   boolean applyConfiguredSkin(Player fallbackPlayer);
 
+  boolean syncConfiguredName();
+
   boolean setHomeAtMaidLocation(Player fallbackPlayer);
 
   Location getHomeLocation();
