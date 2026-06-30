@@ -3,7 +3,9 @@ package com.github.quantumxiaol.craftmaid.job;
 import com.github.quantumxiaol.craftmaid.CraftMaid;
 import com.github.quantumxiaol.craftmaid.anchor.AnchorRegion;
 import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
+import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.anchor.RegionType;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
@@ -37,6 +39,14 @@ public final class MaidJobService {
     return startJob(new FishingJob(plugin, this, player.getUniqueId(), name, fishingSpot, pond));
   }
 
+  public JobActionResult startFishingAuto(Player player) {
+    NameSelection selection = resolveFishingName();
+    if (!selection.success()) {
+      return JobActionResult.failure(selection.message());
+    }
+    return startFishing(player, selection.name());
+  }
+
   public JobActionResult startChunkKeeper(Player player, String name) {
     Location watchPoint =
         plugin.getAnchorService().getLocationOrNull(AnchorType.REDSTONE_WATCH, name);
@@ -47,6 +57,16 @@ public final class MaidJobService {
     return startJob(new ChunkKeeperJob(plugin, this, player.getUniqueId(), name, watchPoint));
   }
 
+  public JobActionResult startChunkKeeperAuto(Player player) {
+    NameSelection selection =
+        resolveSingleAnchorName(
+            AnchorType.REDSTONE_WATCH, "redstone_watch", "/maid chunk start <name>");
+    if (!selection.success()) {
+      return JobActionResult.failure(selection.message());
+    }
+    return startChunkKeeper(player, selection.name());
+  }
+
   public JobActionResult startHarvest(Player player, String name) {
     AnchorRegion farm = plugin.getAnchorService().getRegion(RegionType.FARM, name).orElse(null);
     if (farm == null) {
@@ -54,6 +74,15 @@ public final class MaidJobService {
     }
 
     return startJob(new HarvestFarmJob(plugin, this, player.getUniqueId(), name, farm));
+  }
+
+  public JobActionResult startHarvestAuto(Player player) {
+    NameSelection selection =
+        resolveSingleRegionName(RegionType.FARM, "farm", "/maid harvest start <name>");
+    if (!selection.success()) {
+      return JobActionResult.failure(selection.message());
+    }
+    return startHarvest(player, selection.name());
   }
 
   private JobActionResult startJob(MaidJob job) {
@@ -172,6 +201,89 @@ public final class MaidJobService {
     }
   }
 
+  private NameSelection resolveFishingName() {
+    MaidAnchorService anchors = plugin.getAnchorService();
+    if (anchors.getAnchor(AnchorType.FISHING_SPOT, MaidAnchorService.DEFAULT_NAME).isPresent()
+        && anchors.getRegion(RegionType.POND, MaidAnchorService.DEFAULT_NAME).isPresent()) {
+      return NameSelection.success(MaidAnchorService.DEFAULT_NAME);
+    }
+
+    List<String> candidates =
+        anchors.anchorNames(AnchorType.FISHING_SPOT).stream()
+            .filter(name -> anchors.getAnchor(AnchorType.FISHING_SPOT, name).isPresent())
+            .filter(name -> anchors.getRegion(RegionType.POND, name).isPresent())
+            .toList();
+    if (candidates.size() == 1) {
+      return NameSelection.success(candidates.getFirst());
+    }
+    if (candidates.isEmpty()) {
+      return NameSelection.failure(
+          "缺少同名的 anchor fishing_spot 和完整 region pond。请用 /maid fishing start <name> 指定，或设置 fishing_spot/default 与 pond/default。");
+    }
+    return NameSelection.failure(
+        "发现多个可用钓鱼配置: "
+            + String.join(", ", candidates)
+            + "。请用 /maid fishing start <name> 指定，或设置 fishing_spot/default 与 pond/default。");
+  }
+
+  private NameSelection resolveSingleAnchorName(AnchorType type, String label, String commandHint) {
+    MaidAnchorService anchors = plugin.getAnchorService();
+    if (anchors.getAnchor(type, MaidAnchorService.DEFAULT_NAME).isPresent()) {
+      return NameSelection.success(MaidAnchorService.DEFAULT_NAME);
+    }
+
+    List<String> candidates =
+        anchors.anchorNames(type).stream()
+            .filter(name -> anchors.getAnchor(type, name).isPresent())
+            .toList();
+    if (candidates.size() == 1) {
+      return NameSelection.success(candidates.getFirst());
+    }
+    if (candidates.isEmpty()) {
+      return NameSelection.failure(
+          "缺少 anchor " + label + "。请先设置 " + label + "/default，或使用命令设置一个命名 anchor。");
+    }
+    return NameSelection.failure(
+        "发现多个 "
+            + label
+            + " 配置: "
+            + String.join(", ", candidates)
+            + "。请用 "
+            + commandHint
+            + " 指定，或设置 "
+            + label
+            + "/default。");
+  }
+
+  private NameSelection resolveSingleRegionName(RegionType type, String label, String commandHint) {
+    MaidAnchorService anchors = plugin.getAnchorService();
+    if (anchors.getRegion(type, MaidAnchorService.DEFAULT_NAME).isPresent()) {
+      return NameSelection.success(MaidAnchorService.DEFAULT_NAME);
+    }
+
+    List<String> candidates =
+        anchors.regionNames(type).stream()
+            .filter(name -> anchors.getRegion(type, name).isPresent())
+            .toList();
+    if (candidates.size() == 1) {
+      return NameSelection.success(candidates.getFirst());
+    }
+    if (candidates.isEmpty()) {
+      return NameSelection.failure(
+          "缺少完整 region " + label + "。请先设置 " + label + "/default，或使用命令设置一个命名 region。");
+    }
+    return NameSelection.failure(
+        "发现多个 "
+            + label
+            + " 配置: "
+            + String.join(", ", candidates)
+            + "。请用 "
+            + commandHint
+            + " 指定，或设置 "
+            + label
+            + "/default。");
+  }
+
   public record JobActionResult(boolean success, String message) {
     public static JobActionResult success(String message) {
       return new JobActionResult(true, message);
@@ -179,6 +291,16 @@ public final class MaidJobService {
 
     public static JobActionResult failure(String message) {
       return new JobActionResult(false, message);
+    }
+  }
+
+  private record NameSelection(boolean success, String name, String message) {
+    static NameSelection success(String name) {
+      return new NameSelection(true, name, "");
+    }
+
+    static NameSelection failure(String message) {
+      return new NameSelection(false, "", message);
     }
   }
 }

@@ -1,6 +1,5 @@
 package com.github.quantumxiaol.craftmaid;
 
-import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.context.WorldContextCollector;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
@@ -176,12 +175,9 @@ public class ChatListener implements Listener {
 
     JobActionResult result =
         switch (action) {
-          case FISHING_START ->
-              plugin.getJobService().startFishing(player, MaidAnchorService.DEFAULT_NAME);
-          case CHUNK_KEEPER_START ->
-              plugin.getJobService().startChunkKeeper(player, MaidAnchorService.DEFAULT_NAME);
-          case HARVEST_START ->
-              plugin.getJobService().startHarvest(player, MaidAnchorService.DEFAULT_NAME);
+          case FISHING_START -> plugin.getJobService().startFishingAuto(player);
+          case CHUNK_KEEPER_START -> plugin.getJobService().startChunkKeeperAuto(player);
+          case HARVEST_START -> plugin.getJobService().startHarvestAuto(player);
           case JOB_STOP -> plugin.getJobService().stopActiveJob("job 已通过聊天停止。");
         };
     player.sendMessage(

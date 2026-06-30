@@ -6,7 +6,7 @@ CraftMaid 分成两层能力。
 
 第二层是可选的实体女仆：安装 Citizens 后可以生成女仆 NPC，右键打开菜单；再安装 Sentinel 后可以让 NPC 跟随、护卫、战斗和守点。后续的工作能力会继续沿着 NPC 行为服务扩展。
 
-当前版本仍然不是完整 Minecraft Agent：LLM 只负责聊天回复，不会直接执行工具调用；锚点、区域和第一版 Job 系统已经可用，钓鱼目前是内置模拟产出的 MVP，农田收割、箱子整理、红石机器监控和区块加载还没有实现。
+当前版本仍然不是完整 Minecraft Agent：LLM 只负责聊天回复，不会直接执行工具调用；锚点、区域和第一版 Job 系统已经可用，钓鱼、农田收割和 ChunkKeeper 仍是 MVP，箱子整理还没有实现。
 
 ## 当前能力
 
@@ -17,7 +17,7 @@ CraftMaid 分成两层能力。
 * **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
 * **Job 框架骨架**：统一 `MaidJob` / `activeJob` / `JobPhase`，可以查看 `idle` / `fishing` / `chunk_keeper` / `harvest` / `following` / `guarding` 状态，并通过命令或菜单停止当前工作。
-* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。
+* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。可选开启 Denizen `/npc fish` 作为表演动画，但 CraftMaid 仍负责产出和背包控制。
 * **ChunkKeeper MVP**：读取 `redstone_watch/<name>`，使用 Paper `addPluginChunkTicket` 保持机器所在 chunk 加载；停止 job 或插件关闭时释放 ticket。
 * **农田收割 MVP**：读取 `farm/<name>`，只处理成熟的白名单 `Ageable` 作物；每 tick 限流，产物以 all-or-nothing 方式进入女仆背包，背包满时停止且不改当前方块。
 * **轻量自然语言 intent**：主人可以说“露西，去钓鱼 / 看住机器 / 收农田 / 停止工作”触发对应安全动作。
@@ -29,8 +29,8 @@ CraftMaid 分成两层能力。
 
 ## 尚未实现
 
-* **Denizen 行为**：`plugin.yml` 已经 `softdepend` Denizen，但当前没有真正调用 Denizen API 或脚本。
-* **真实鱼钩/Denizen 钓鱼**：当前钓鱼是 CraftMaid 内置模拟产出，还没有接 Denizen `/npc fish`，也没有生成原版 `FishHook` 实体。
+* **完整 Denizen 行为**：当前只可选调用 Denizen `/npc fish` 作为钓鱼表演层，还没有接 Denizen 脚本任务或 Denizen 驱动的工作流。
+* **真实鱼钩/原版钓鱼**：当前钓鱼产出由 CraftMaid 内置模拟控制，不生成原版 `FishHook` 实体，也不把 loot 权交给 Denizen。
 * **自动找水域**：钓鱼需要先设置 `region pond/<name>`，暂时不会自动扫描附近水域。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
@@ -47,7 +47,7 @@ CraftMaid 分成两层能力。
 * **可选扩展插件**：Sentinel / Denizen 用于护卫、战斗、脚本演出、钓鱼等扩展能力；未安装时不影响基础 AI 对话。
   * [Sentinel](https://www.spigotmc.org/resources/sentinel.22017/)：Citizens 的战斗 NPC 扩展，当前已用于右键菜单里的基础护卫能力。Jenkins dev builds：[Sentinel Jenkins](https://ci.citizensnpcs.co/job/Sentinel/)。
   * [Denizen](https://denizenscript.com/)：Citizens 生态脚本引擎，适合后续做 NPC 演出、脚本任务、钓鱼原型等。稳定构建：[Denizen Jenkins](https://ci.citizensnpcs.co/job/Denizen/)；开发构建：[Denizen Developmental Jenkins](https://ci.citizensnpcs.co/job/Denizen_Developmental/)。
-  * Denizen 当前仍未接入；“去钓鱼”由 CraftMaid 内置 MVP 模拟产出，不依赖 Denizen。
+  * Denizen 当前只作为可选钓鱼表演层；“去钓鱼”由 CraftMaid 内置 MVP 控制产出，不依赖 Denizen。
 * **AI 算力**：兼容 OpenAI API 格式的 LLM 服务接口 (如本地部署的 vLLM、Ollama 或云端 API)
 
 ## 🛠️ 安装、编译与构建
@@ -230,14 +230,14 @@ conversation:
 * 跟随我 / 别跟了
 * 停止工作（停止当前 job、跟随或护卫）
 * 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
-* 去钓鱼（使用 `fishing_spot/default` 和 `pond/default`）
-* 看住机器（使用 `redstone_watch/default` 加载 chunk）
-* 收农田（使用 `farm/default` 收割成熟作物）
+* 去钓鱼（优先使用 `fishing_spot/default` 和 `pond/default`；没有 default 且只有一个可用配置时自动使用它）
+* 看住机器（优先使用 `redstone_watch/default`；没有 default 且只有一个可用配置时自动使用它）
+* 收农田（优先使用 `farm/default`；没有 default 且只有一个可用配置时自动使用它）
 * 关闭菜单
 
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
 
-anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田、箱子和红石机器工作还只是数据准备。
+anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田收割已经使用 `farm`，ChunkKeeper 已经使用 `redstone_watch`；箱子整理还只是数据准备。
 
 单点 anchor 用于“女仆站在哪里 / 去哪里 / 从哪里交互”：
 
@@ -268,7 +268,7 @@ anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、
 
 `region show` 会在长方体 12 条边上短暂显示粒子边框，只对执行命令的玩家可见。为了避免误刷大量粒子，过大的区域会拒绝显示。
 
-当前推荐的 anchor 类型是 `home`、`fishing_spot`、`chest`、`guard_post`、`redstone_watch`；region 类型是 `farm`、`pond`、`redstone`。名称只能使用小写字母、数字、下划线或连字符。右键菜单只操作 `default` 名称；多个命名点位和区域请用命令设置。
+当前推荐的 anchor 类型是 `home`、`fishing_spot`、`chest`、`guard_post`、`redstone_watch`；region 类型是 `farm`、`pond`、`redstone`。名称只能使用小写字母、数字、下划线或连字符。右键菜单和自然语言 intent 会优先使用 `default`；如果没有 `default` 但只有一个可用配置，会自动使用它；如果有多个配置，会拒绝自动选择并提示用命令指定名称。
 
 Job 状态和钓鱼控制：
 
@@ -283,7 +283,7 @@ Job 状态和钓鱼控制：
 /craftmaid harvest stop
 ```
 
-`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 默认使用 `default`。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。
+`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
 
 `anchors.yml` 大致结构如下：
 

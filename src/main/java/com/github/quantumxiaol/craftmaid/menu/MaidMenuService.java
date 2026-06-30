@@ -198,7 +198,7 @@ public final class MaidMenuService implements Listener {
         MaidMenuAction.FISHING_START,
         Material.FISHING_ROD,
         "去钓鱼",
-        "使用 fishing_spot/default 和 pond/default。");
+        "优先使用 default；没有 default 时自动使用唯一配置。");
     setActionItem(
         holder,
         inventory,
@@ -206,7 +206,7 @@ public final class MaidMenuService implements Listener {
         MaidMenuAction.CHUNK_KEEPER_START,
         Material.CLOCK,
         "看住机器",
-        "使用 redstone_watch/default 加载机器区块。");
+        "优先使用 redstone_watch/default；没有 default 时自动使用唯一配置。");
     setActionItem(
         holder,
         inventory,
@@ -214,7 +214,7 @@ public final class MaidMenuService implements Listener {
         MaidMenuAction.HARVEST_START,
         Material.WHEAT,
         "收农田",
-        "使用 farm/default 收割成熟作物。");
+        "优先使用 farm/default；没有 default 时自动使用唯一配置。");
     setActionItem(holder, inventory, 40, MaidMenuAction.CLOSE, Material.BARRIER, "关闭", "关闭菜单。");
 
     player.openInventory(inventory);
@@ -618,8 +618,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    JobActionResult result =
-        plugin.getJobService().startFishing(player, MaidAnchorService.DEFAULT_NAME);
+    JobActionResult result = plugin.getJobService().startFishingAuto(player);
     player.closeInventory();
     player.sendMessage(
         Component.text(
@@ -630,8 +629,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    JobActionResult result =
-        plugin.getJobService().startChunkKeeper(player, MaidAnchorService.DEFAULT_NAME);
+    JobActionResult result = plugin.getJobService().startChunkKeeperAuto(player);
     player.closeInventory();
     player.sendMessage(
         Component.text(
@@ -642,8 +640,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    JobActionResult result =
-        plugin.getJobService().startHarvest(player, MaidAnchorService.DEFAULT_NAME);
+    JobActionResult result = plugin.getJobService().startHarvestAuto(player);
     player.closeInventory();
     player.sendMessage(
         Component.text(
