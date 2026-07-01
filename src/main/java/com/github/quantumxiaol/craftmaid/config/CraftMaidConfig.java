@@ -56,9 +56,9 @@ public record CraftMaidConfig(
             plugin.getConfig().getBoolean("intent.allow_followup_window", true),
             plugin.getConfig().getBoolean("intent.llm_json", true),
             plugin.getConfig().getBoolean("intent.response_format_json_object", true),
-            Math.max(160, plugin.getConfig().getInt("intent.plan_max_tokens", 512)),
+            Math.max(160, plugin.getConfig().getInt("intent.plan_max_tokens", 1024)),
             clamp(plugin.getConfig().getDouble("intent.plan_temperature", 0.2), 0.0, 2.0),
-            Math.max(120, plugin.getConfig().getInt("intent.final_max_tokens", 320)),
+            Math.max(120, plugin.getConfig().getInt("intent.final_max_tokens", 480)),
             clamp(plugin.getConfig().getDouble("intent.final_temperature", 0.6), 0.0, 2.0));
 
     ConversationSettings conversation =

@@ -59,12 +59,25 @@ public final class MaidActionExecutor {
           name.isBlank()
               ? plugin.getJobService().startChunkKeeperAuto(player)
               : plugin.getJobService().startChunkKeeper(player, name);
-      case FISHING_STOP -> plugin.getJobService().stopFishing("钓鱼已通过聊天停止。");
-      case HARVEST_STOP -> plugin.getJobService().stopHarvest("收田已通过聊天停止。");
-      case CHUNK_KEEPER_STOP -> plugin.getJobService().stopChunkKeeper("看守机器已通过聊天停止。");
-      case JOB_STOP -> plugin.getJobService().stopActiveJob("job 已通过聊天停止。");
+      case FISHING_STOP -> plugin.getJobService().stopFishing("好的主人，我先把鱼竿收起来。");
+      case HARVEST_STOP -> plugin.getJobService().stopHarvest("好的主人，我先停下收田。");
+      case CHUNK_KEEPER_STOP -> plugin.getJobService().stopChunkKeeper("好的主人，我先不看机器了。");
+      case RECALL -> recallMaid(player);
+      case JOB_STOP -> plugin.getJobService().stopActiveJob("好的主人，我先停下手头的事。");
       case JOB_STATUS -> JobActionResult.success(plugin.getJobService().statusLine());
     };
+  }
+
+  private JobActionResult recallMaid(Player player) {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法召回女仆。");
+    }
+    plugin.getJobService().stopActiveJobForExternalControl("主人叫我过去，我先停下手头的事。");
+    boolean moved = plugin.getMaidNpcService().spawnAt(player, plugin.getMaidName());
+    if (!moved) {
+      return JobActionResult.failure("召回失败，请检查 Citizens 是否正常加载。");
+    }
+    return JobActionResult.success("已回到主人身边。");
   }
 
   private String validate(List<MaidAction> actions) {
@@ -77,8 +90,8 @@ public final class MaidActionExecutor {
 
     MaidAction first = actions.get(0);
     MaidAction second = actions.get(1);
-    if (!first.type().isStop() || !second.type().isStart()) {
-      return "只允许单个 action，或 STOP + START 的切换组合。";
+    if (!first.type().isStop() || !second.type().canFollowStopInPlan()) {
+      return "只允许单个 action，或 STOP + START/RECALL 的切换组合。";
     }
     return "";
   }

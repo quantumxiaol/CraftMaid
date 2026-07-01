@@ -11,6 +11,7 @@ public enum MaidActionType {
   HARVEST_STOP,
   CHUNK_KEEPER_START,
   CHUNK_KEEPER_STOP,
+  RECALL,
   JOB_STOP,
   JOB_STATUS;
 
@@ -23,6 +24,10 @@ public enum MaidActionType {
         || this == FISHING_STOP
         || this == HARVEST_STOP
         || this == CHUNK_KEEPER_STOP;
+  }
+
+  public boolean canFollowStopInPlan() {
+    return isStart() || this == RECALL;
   }
 
   public static Optional<MaidActionType> fromInput(String input) {

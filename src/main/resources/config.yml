@@ -57,9 +57,9 @@ intent:
   # DeepSeek 和 OpenAI GPT 可用；不兼容接口会自动重试不带 response_format，并在本次运行中降级。
   response_format_json_object: true
   # 这里限制的是模型输出 token，不限制输入里的 system prompt / 历史 / 环境上下文。
-  plan_max_tokens: 512
+  plan_max_tokens: 1024
   plan_temperature: 0.2
-  final_max_tokens: 320
+  final_max_tokens: 480
   final_temperature: 0.6
 conversation:
   enabled: true

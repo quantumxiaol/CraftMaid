@@ -384,6 +384,7 @@ public class ChatListener implements Listener {
 
         【CraftMaid JSON Turn Protocol v1】
         你每次必须只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。
+        不要输出推理过程、分析过程或额外文本；最终回复必须写入普通 content，第一字符必须是 {，最后字符必须是 }。
         JSON 格式：
         {
           "chat": "要对玩家说的话；如果需要执行 actions，则必须为空字符串",
@@ -399,6 +400,7 @@ public class ChatListener implements Listener {
         - HARVEST_STOP(name)
         - CHUNK_KEEPER_START(name)
         - CHUNK_KEEPER_STOP(name)
+        - RECALL
         - JOB_STOP(target=current)
         - JOB_STATUS
 
@@ -409,9 +411,10 @@ public class ChatListener implements Listener {
         4. 只允许使用列出的 action，不要编造 action，不要输出服务器命令。
         5. name 必须来自“可用工作配置”；如果玩家没有指定且只有一个可用配置，可以省略 name 让插件自动选择。
         6. 如果玩家说“别钓鱼了，快去收田”，输出 JOB_STOP + HARVEST_START。
-        7. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
-        8. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
-        9. chat 最多 80 个中文字符，必须是完整句子。
+        7. 如果玩家说“到我这来”“回来”“过来”，输出 RECALL；如果你正在工作，输出 JOB_STOP + RECALL。
+        8. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
+        9. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
+        10. chat 最多 80 个中文字符，必须是完整句子。
         """;
   }
 
@@ -431,17 +434,49 @@ public class ChatListener implements Listener {
         %s
 
         请根据动作结果和新状态，用女仆口吻简短回复玩家。
+        不要复述 JOB_STOP、success、failure、action、服务器、插件、JSON 等内部字段。
         这次 actions 必须为空数组，不要再请求任何 action。
         """
         .formatted(playerSpeech, actionResult.summary(), runtimeContextCollector.collect(player));
   }
 
   private String fallbackFinalReply(MaidActionExecutionResult actionResult) {
-    String summary = actionResult.summary();
-    if (summary.length() > 120) {
-      summary = summary.substring(0, 120) + "...";
+    String summary = actionResult == null ? "" : actionResult.summary();
+    String lowerSummary = summary.toLowerCase(Locale.ROOT);
+    if (lowerSummary.contains("action_denied")) {
+      return "主人，这件事我现在不能替您做。";
     }
-    return "主人，动作结果是：" + summary;
+    if (lowerSummary.contains("action_rejected")) {
+      return "主人，这个安排我没法照做，您再换个说法吧。";
+    }
+    if (lowerSummary.contains("failure")) {
+      return "主人，我刚才试了一下，但没有顺利完成。";
+    }
+    if (summary.contains("已回到主人身边")) {
+      return "主人，我回来了。";
+    }
+    if (summary.contains("已停止") && summary.contains("fishing")) {
+      return "好的主人，我先把鱼竿收起来。";
+    }
+    if (summary.contains("已停止") && summary.contains("harvest")) {
+      return "好的主人，我先停下收田。";
+    }
+    if (summary.contains("已停止") && summary.contains("chunk_keeper")) {
+      return "好的主人，我先不看机器了。";
+    }
+    if (summary.contains("已停止")) {
+      return "好的主人，我先停下手头的事。";
+    }
+    if (summary.contains("开始钓鱼")) {
+      return "好的主人，我这就去钓鱼。";
+    }
+    if (summary.contains("开始收割农田")) {
+      return "好的主人，我这就去收田。";
+    }
+    if (summary.contains("开始看守")) {
+      return "好的主人，我会看住那边。";
+    }
+    return "好的主人。";
   }
 
   private void triggerMemoryCompression(UUID playerId, LlmClient client) {

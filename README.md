@@ -156,9 +156,9 @@ intent:
   allow_followup_window: true # 允许 followup_seconds 窗口内免唤醒触发工作意图
   llm_json: true # 普通聊天和工作控制统一走 JSON：{chat, actions}
   response_format_json_object: true # DeepSeek 和 OpenAI GPT 可用；不兼容接口会自动重试并降级
-  plan_max_tokens: 512 # 输出 token 上限，不限制输入里的 system prompt / 历史 / 环境上下文
+  plan_max_tokens: 1024 # 输出 token 上限，不限制输入里的 system prompt / 历史 / 环境上下文
   plan_temperature: 0.2
-  final_max_tokens: 320
+  final_max_tokens: 480
   final_temperature: 0.6
 conversation:
   enabled: true
@@ -310,11 +310,13 @@ Job 状态和钓鱼控制：
 
 有 action 时，第一轮 `chat` 不会显示；插件会先执行 action，再把执行结果、更新后的 job 状态、最近工作事件和背包摘要交给同一个 LLM 生成最终回复。长期历史只记录玩家原话和最终回复，不记录内部 JSON、action result 或每条产出日志。
 
-当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`JOB_STOP`、`JOB_STATUS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。
+当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`JOB_STOP`、`JOB_STATUS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
 `intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。
+
+如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
 
 为提高 DeepSeek 前缀缓存命中率，CraftMaid 会把稳定内容放在消息前缀：女仆人设、JSON 协议、action 白名单、安全规则、长期 Memory、历史对话；当前环境、job 状态、最近产出、背包摘要、玩家本轮原话和 action result 放在最后一个 user message。服务端日志会输出 DeepSeek 兼容 usage 中的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，例如 `LLM mode=plan cache_hit=... cache_miss=...`。
 

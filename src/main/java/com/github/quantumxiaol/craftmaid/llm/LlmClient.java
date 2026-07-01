@@ -291,6 +291,7 @@ public class LlmClient {
             ? firstChoice.get("finish_reason").getAsString()
             : "";
     logUsage(responseJson, mode, finishReason);
+    boolean hasReasoningContent = false;
     if (firstChoice.has("message")) {
       JsonObject message = firstChoice.getAsJsonObject("message");
       if (message.has("content")) {
@@ -299,6 +300,9 @@ public class LlmClient {
           return content;
         }
       }
+      hasReasoningContent =
+          message.has("reasoning_content")
+              && !extractContent(message.get("reasoning_content")).isBlank();
     }
 
     if (firstChoice.has("text")) {
@@ -306,6 +310,14 @@ public class LlmClient {
       if (!text.isBlank()) {
         return text;
       }
+    }
+
+    if (hasReasoningContent) {
+      String reason =
+          "length".equalsIgnoreCase(finishReason)
+              ? "LLM 输出被 max_tokens 截断，只返回 reasoning_content，没有返回 content"
+              : "LLM 只返回 reasoning_content，没有返回 content";
+      throw new RuntimeException(reason + ": " + summarize(responseBody));
     }
 
     throw new RuntimeException("LLM 响应中没有可用文本: " + summarize(responseBody));
