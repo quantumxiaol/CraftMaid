@@ -12,18 +12,30 @@ public enum MaidActionType {
   CHUNK_KEEPER_START,
   CHUNK_KEEPER_STOP,
   RECALL,
+  FOLLOW_START,
+  FOLLOW_STOP,
+  GUARD_START,
+  GUARD_STOP,
+  GUARD_HERE,
   JOB_STOP,
   JOB_STATUS;
 
   public boolean isStart() {
-    return this == FISHING_START || this == HARVEST_START || this == CHUNK_KEEPER_START;
+    return this == FISHING_START
+        || this == HARVEST_START
+        || this == CHUNK_KEEPER_START
+        || this == FOLLOW_START
+        || this == GUARD_START
+        || this == GUARD_HERE;
   }
 
   public boolean isStop() {
     return this == JOB_STOP
         || this == FISHING_STOP
         || this == HARVEST_STOP
-        || this == CHUNK_KEEPER_STOP;
+        || this == CHUNK_KEEPER_STOP
+        || this == FOLLOW_STOP
+        || this == GUARD_STOP;
   }
 
   public boolean canFollowStopInPlan() {

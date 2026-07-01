@@ -34,7 +34,7 @@ CraftMaid 分成两层能力。
 * **自动找水域**：钓鱼需要先设置 `region pond/<name>`，暂时不会自动扫描附近水域。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
-* **完整自然语言动作执行**：当前只开放钓鱼、收田、看机器、停止工作和状态查询这些有限 action；“露西，跟着我”还不会自动转换成 `FOLLOW_START`。
+* **完整自然语言动作执行**：当前只开放钓鱼、收田、看机器、召回、跟随、护卫、守点、停止工作和状态查询这些有限 action；还没有开放任意工具调用或复杂任务队列。
 * **跟随细节**：当前是第一版，还没有 `follow_distance`、`start_distance`、`teleport_distance`、跨世界处理、卡住恢复或重载后继续跟随。
 
 ## 📦 前置要求
@@ -310,7 +310,7 @@ Job 状态和钓鱼控制：
 
 有 action 时，第一轮 `chat` 不会显示；插件会先执行 action，再把执行结果、更新后的 job 状态、最近工作事件和背包摘要交给同一个 LLM 生成最终回复。长期历史只记录玩家原话和最终回复，不记录内部 JSON、action result 或每条产出日志。
 
-当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`JOB_STOP`、`JOB_STATUS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。
+当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 

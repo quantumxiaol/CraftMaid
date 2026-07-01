@@ -63,6 +63,11 @@ public final class MaidActionExecutor {
       case HARVEST_STOP -> plugin.getJobService().stopHarvest("好的主人，我先停下收田。");
       case CHUNK_KEEPER_STOP -> plugin.getJobService().stopChunkKeeper("好的主人，我先不看机器了。");
       case RECALL -> recallMaid(player);
+      case FOLLOW_START -> startFollowing(player);
+      case FOLLOW_STOP -> stopFollowing();
+      case GUARD_START -> startGuarding(player);
+      case GUARD_STOP -> stopGuarding();
+      case GUARD_HERE -> startGuardingHere(player);
       case JOB_STOP -> plugin.getJobService().stopActiveJob("好的主人，我先停下手头的事。");
       case JOB_STATUS -> JobActionResult.success(plugin.getJobService().statusLine());
     };
@@ -78,6 +83,71 @@ public final class MaidActionExecutor {
       return JobActionResult.failure("召回失败，请检查 Citizens 是否正常加载。");
     }
     return JobActionResult.success("已回到主人身边。");
+  }
+
+  private JobActionResult startFollowing(Player player) {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法跟随主人。");
+    }
+    plugin.getJobService().stopActiveJobForExternalControl("主人让我跟随，我先停下手头的事。");
+    boolean started = plugin.getMaidNpcService().startFollowing(player);
+    if (!started) {
+      return JobActionResult.failure("启动跟随失败，请检查 Citizens 是否正常加载。");
+    }
+    return JobActionResult.success("已开始跟随主人。");
+  }
+
+  private JobActionResult stopFollowing() {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法停止跟随。");
+    }
+    plugin.getMaidNpcService().stopFollowing();
+    return JobActionResult.success("已停止跟随。");
+  }
+
+  private JobActionResult startGuarding(Player player) {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法护卫主人。");
+    }
+    if (!plugin.getMaidNpcService().isGuardAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Sentinel，无法护卫主人。");
+    }
+    plugin.getJobService().stopJobsForGuarding("主人让我护卫，我先停下手头的事。");
+    boolean started = plugin.getMaidNpcService().startGuarding(player);
+    if (!started) {
+      return JobActionResult.failure("启动护卫失败，请检查 Sentinel 是否正常加载。");
+    }
+    return JobActionResult.success("已开始保护主人。");
+  }
+
+  private JobActionResult stopGuarding() {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法停止护卫。");
+    }
+    if (!plugin.getMaidNpcService().isGuardAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Sentinel，无法停止护卫。");
+    }
+    boolean stopped = plugin.getMaidNpcService().stopGuarding();
+    if (!stopped) {
+      return JobActionResult.failure("停止护卫失败，请检查 Sentinel 是否正常加载。");
+    }
+    return JobActionResult.success("已停止护卫。");
+  }
+
+  private JobActionResult startGuardingHere(Player player) {
+    if (!plugin.getMaidNpcService().isAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Citizens，无法守在这里。");
+    }
+    if (!plugin.getMaidNpcService().isGuardAvailable()) {
+      return JobActionResult.failure("未安装或未启用 Sentinel，无法守在这里。");
+    }
+    plugin.getJobService().stopJobsForGuarding("主人让我守在这里，我先停下手头的事。");
+    plugin.getMaidNpcService().stopFollowing();
+    boolean started = plugin.getMaidNpcService().startGuardingHere(player);
+    if (!started) {
+      return JobActionResult.failure("启动守卫失败，请检查 Sentinel 是否正常加载。");
+    }
+    return JobActionResult.success("已开始守在这里。");
   }
 
   private String validate(List<MaidAction> actions) {

@@ -401,6 +401,11 @@ public class ChatListener implements Listener {
         - CHUNK_KEEPER_START(name)
         - CHUNK_KEEPER_STOP(name)
         - RECALL
+        - FOLLOW_START
+        - FOLLOW_STOP
+        - GUARD_START
+        - GUARD_STOP
+        - GUARD_HERE
         - JOB_STOP(target=current)
         - JOB_STATUS
 
@@ -412,9 +417,14 @@ public class ChatListener implements Listener {
         5. name 必须来自“可用工作配置”；如果玩家没有指定且只有一个可用配置，可以省略 name 让插件自动选择。
         6. 如果玩家说“别钓鱼了，快去收田”，输出 JOB_STOP + HARVEST_START。
         7. 如果玩家说“到我这来”“回来”“过来”，输出 RECALL；如果你正在工作，输出 JOB_STOP + RECALL。
-        8. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
-        9. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
-        10. chat 最多 80 个中文字符，必须是完整句子。
+        8. 如果玩家说“跟着我”“跟我来”“跟上”，输出 FOLLOW_START；如果你正在工作，输出 JOB_STOP + FOLLOW_START。
+        9. 如果玩家说“别跟了”“停止跟随”“留在这里”，输出 FOLLOW_STOP。
+        10. 如果玩家说“保护我”“护卫我”“帮我战斗”“去战斗”“打怪”，输出 GUARD_START；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_START。
+        11. 如果玩家说“守在这里”“守住这里”“在这里警戒”，输出 GUARD_HERE；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_HERE。
+        12. 如果玩家说“停止护卫”“别打了”“停止战斗”“不用保护我了”，输出 GUARD_STOP。
+        13. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
+        14. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
+        15. chat 最多 80 个中文字符，必须是完整句子。
         """;
   }
 
@@ -454,6 +464,21 @@ public class ChatListener implements Listener {
     }
     if (summary.contains("已回到主人身边")) {
       return "主人，我回来了。";
+    }
+    if (summary.contains("已开始跟随")) {
+      return "好的主人，我会跟紧您。";
+    }
+    if (summary.contains("已停止跟随")) {
+      return "好的主人，我会留在这里。";
+    }
+    if (summary.contains("已开始保护")) {
+      return "好的主人，我会保护您。";
+    }
+    if (summary.contains("已停止护卫")) {
+      return "好的主人，我先放下警戒。";
+    }
+    if (summary.contains("已开始守在这里")) {
+      return "好的主人，我会守住这里。";
     }
     if (summary.contains("已停止") && summary.contains("fishing")) {
       return "好的主人，我先把鱼竿收起来。";
