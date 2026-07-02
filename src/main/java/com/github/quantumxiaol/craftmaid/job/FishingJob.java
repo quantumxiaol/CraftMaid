@@ -21,6 +21,7 @@ import org.bukkit.scheduler.BukkitTask;
 final class FishingJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 20;
   private static final int MAX_POND_VOLUME = 8192;
+  private static final int MAX_CHUNK_TICKETS = 64;
   private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
   private static final int MOVE_RETRY_TICKS = 60;
   private static final double ARRIVAL_DISTANCE = 2.5;
@@ -32,6 +33,7 @@ final class FishingJob implements MaidJob, Runnable {
   private final Location fishingSpot;
   private final AnchorRegion pond;
   private final Location pondCenter;
+  private final JobChunkTickets chunkTickets;
 
   private BukkitTask task;
   private JobPhase phase = JobPhase.STARTING;
@@ -60,6 +62,7 @@ final class FishingJob implements MaidJob, Runnable {
     this.fishingSpot = fishingSpot.clone();
     this.pond = pond;
     this.pondCenter = centerOf(pond);
+    this.chunkTickets = new JobChunkTickets(plugin);
     this.waitTicks = nextWaitTicks();
   }
 
@@ -94,19 +97,45 @@ final class FishingJob implements MaidJob, Runnable {
       phase = JobPhase.FAILED;
       return JobActionResult.failure("pond/" + name + " 所在世界未加载: " + pond.worldName());
     }
+    long requiredChunkTickets = JobChunkTickets.countRegionAndLocationChunks(pond, fishingSpot);
+    if (requiredChunkTickets > MAX_CHUNK_TICKETS) {
+      phase = JobPhase.FAILED;
+      return JobActionResult.failure(
+          "pond/"
+              + name
+              + " 跨越 chunk 太多: "
+              + requiredChunkTickets
+              + "，当前上限 "
+              + MAX_CHUNK_TICKETS
+              + "。");
+    }
+    chunkTickets.addRegion(pond);
+    chunkTickets.addLocation(fishingSpot);
     if (countWaterBlocks(world) <= 0) {
       phase = JobPhase.FAILED;
+      chunkTickets.release();
       return JobActionResult.failure("pond/" + name + " 里没有找到水方块。");
     }
     if (!plugin.getMaidNpcService().moveTo(fishingSpot)) {
       phase = JobPhase.FAILED;
+      chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 fishing_spot/" + name + "。");
     }
 
     phase = JobPhase.TRAVELLING;
     task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, PERIOD_TICKS);
-    plugin.getJobEventBuffer().add("开始钓鱼任务 fishing/" + name + "。");
-    plugin.getLogger().info("FishingJob started: " + name + " pond=" + pond.shortText());
+    plugin
+        .getJobEventBuffer()
+        .add("开始钓鱼任务 fishing/" + name + "，临时加载 chunk 数 " + chunkTickets.size() + "。");
+    plugin
+        .getLogger()
+        .info(
+            "FishingJob started: "
+                + name
+                + " pond="
+                + pond.shortText()
+                + " tickets="
+                + chunkTickets.size());
     return JobActionResult.success("已开始钓鱼任务: " + name);
   }
 
@@ -205,6 +234,8 @@ final class FishingJob implements MaidJob, Runnable {
       animationStarted = false;
     }
     plugin.getMaidNpcService().stopMoving();
+    int releasedChunkTickets = chunkTickets.size();
+    chunkTickets.release();
     plugin
         .getLogger()
         .info(
@@ -217,7 +248,9 @@ final class FishingJob implements MaidJob, Runnable {
                 + " junk="
                 + junkCount
                 + " treasure="
-                + treasureCount);
+                + treasureCount
+                + " releasedTickets="
+                + releasedChunkTickets);
     plugin
         .getJobEventBuffer()
         .add(
@@ -231,7 +264,9 @@ final class FishingJob implements MaidJob, Runnable {
                 + junkCount
                 + "，宝藏 "
                 + treasureCount
-                + "。");
+                + "，已释放临时 chunk ticket "
+                + releasedChunkTickets
+                + " 个。");
   }
 
   @Override
@@ -258,6 +293,8 @@ final class FishingJob implements MaidJob, Runnable {
         + name
         + " phase="
         + phase.key()
+        + " chunks="
+        + chunkTickets.size()
         + " catches="
         + catchCount
         + " fish="

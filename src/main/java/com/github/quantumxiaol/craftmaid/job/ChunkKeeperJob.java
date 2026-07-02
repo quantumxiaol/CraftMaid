@@ -3,8 +3,6 @@ package com.github.quantumxiaol.craftmaid.job;
 import com.github.quantumxiaol.craftmaid.CraftMaid;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig.ChunkKeeperSettings;
 import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -15,7 +13,7 @@ final class ChunkKeeperJob implements MaidJob {
   private final UUID ownerId;
   private final String name;
   private final Location watchPoint;
-  private final List<ChunkKey> tickets = new ArrayList<>();
+  private final JobChunkTickets tickets;
 
   private JobPhase phase = JobPhase.STARTING;
   private boolean stopped;
@@ -28,6 +26,7 @@ final class ChunkKeeperJob implements MaidJob {
     this.ownerId = ownerId;
     this.name = name;
     this.watchPoint = watchPoint.clone();
+    this.tickets = new JobChunkTickets(plugin);
   }
 
   @Override
@@ -60,14 +59,7 @@ final class ChunkKeeperJob implements MaidJob {
 
     phase = JobPhase.RUNNING;
     int radius = plugin.getChunkKeeperSettings().radiusChunks();
-    int centerX = watchPoint.getBlockX() >> 4;
-    int centerZ = watchPoint.getBlockZ() >> 4;
-    for (int x = centerX - radius; x <= centerX + radius; x++) {
-      for (int z = centerZ - radius; z <= centerZ + radius; z++) {
-        world.addPluginChunkTicket(x, z, plugin);
-        tickets.add(new ChunkKey(world.getName(), x, z));
-      }
-    }
+    tickets.addAround(watchPoint, radius);
 
     if (!plugin.getMaidNpcService().isGuarding()) {
       plugin.getMaidNpcService().moveTo(watchPoint);
@@ -135,7 +127,7 @@ final class ChunkKeeperJob implements MaidJob {
 
   private void stopInternal() {
     stopped = true;
-    releaseTickets();
+    tickets.release();
     if (guardStarted) {
       plugin.getMaidNpcService().stopGuarding();
       guardStarted = false;
@@ -143,16 +135,4 @@ final class ChunkKeeperJob implements MaidJob {
     plugin.getJobEventBuffer().add("看守红石机器 chunk_keeper/" + name + " 停止，已释放 chunk ticket。");
     plugin.getLogger().info("ChunkKeeperJob stopped: " + name);
   }
-
-  private void releaseTickets() {
-    for (ChunkKey ticket : tickets) {
-      World world = plugin.getServer().getWorld(ticket.worldName());
-      if (world != null) {
-        world.removePluginChunkTicket(ticket.x(), ticket.z(), plugin);
-      }
-    }
-    tickets.clear();
-  }
-
-  private record ChunkKey(String worldName, int x, int z) {}
 }

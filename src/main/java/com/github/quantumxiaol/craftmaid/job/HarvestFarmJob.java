@@ -23,6 +23,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 final class HarvestFarmJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 1;
+  private static final int MAX_CHUNK_TICKETS = 64;
   private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
   private static final int MOVE_RETRY_TICKS = 20;
   private static final double ARRIVAL_DISTANCE = 3.0;
@@ -40,6 +41,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
   private final String name;
   private final AnchorRegion farm;
   private final Location farmCenter;
+  private final JobChunkTickets chunkTickets;
 
   private BukkitTask task;
   private JobPhase phase = JobPhase.STARTING;
@@ -62,6 +64,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
     this.name = name;
     this.farm = farm;
     this.farmCenter = centerOf(farm);
+    this.chunkTickets = new JobChunkTickets(plugin);
     this.cursorX = farm.minX();
     this.cursorY = farm.minY();
     this.cursorZ = farm.minZ();
@@ -100,15 +103,39 @@ final class HarvestFarmJob implements MaidJob, Runnable {
       phase = JobPhase.FAILED;
       return JobActionResult.failure("farm/" + name + " 所在世界未加载: " + farm.worldName());
     }
+    long requiredChunkTickets = JobChunkTickets.countRegionChunks(farm);
+    if (requiredChunkTickets > MAX_CHUNK_TICKETS) {
+      phase = JobPhase.FAILED;
+      return JobActionResult.failure(
+          "farm/"
+              + name
+              + " 跨越 chunk 太多: "
+              + requiredChunkTickets
+              + "，当前上限 "
+              + MAX_CHUNK_TICKETS
+              + "。");
+    }
+    chunkTickets.addRegion(farm);
     if (!plugin.getMaidNpcService().moveTo(farmCenter)) {
       phase = JobPhase.FAILED;
+      chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 farm/" + name + "。");
     }
 
     phase = JobPhase.TRAVELLING;
     task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, PERIOD_TICKS);
-    plugin.getJobEventBuffer().add("开始收割农田 harvest/" + name + "。");
-    plugin.getLogger().info("HarvestFarmJob started: " + name + " farm=" + farm.shortText());
+    plugin
+        .getJobEventBuffer()
+        .add("开始收割农田 harvest/" + name + "，临时加载 chunk 数 " + chunkTickets.size() + "。");
+    plugin
+        .getLogger()
+        .info(
+            "HarvestFarmJob started: "
+                + name
+                + " farm="
+                + farm.shortText()
+                + " tickets="
+                + chunkTickets.size());
     return JobActionResult.success("已开始收割农田: " + name);
   }
 
@@ -174,6 +201,8 @@ final class HarvestFarmJob implements MaidJob, Runnable {
         + name
         + " phase="
         + phase.key()
+        + " chunks="
+        + chunkTickets.size()
         + " scanned="
         + scannedBlocks
         + " harvested="
@@ -294,6 +323,8 @@ final class HarvestFarmJob implements MaidJob, Runnable {
       task = null;
     }
     plugin.getMaidNpcService().stopMoving();
+    int releasedChunkTickets = chunkTickets.size();
+    chunkTickets.release();
     plugin
         .getLogger()
         .info(
@@ -302,7 +333,9 @@ final class HarvestFarmJob implements MaidJob, Runnable {
                 + " harvested="
                 + harvestedBlocks
                 + " items="
-                + itemCount);
+                + itemCount
+                + " releasedTickets="
+                + releasedChunkTickets);
     plugin
         .getJobEventBuffer()
         .add(
@@ -312,7 +345,9 @@ final class HarvestFarmJob implements MaidJob, Runnable {
                 + harvestedBlocks
                 + " 个作物，放入 "
                 + itemCount
-                + " 件物品。");
+                + " 件物品，已释放临时 chunk ticket "
+                + releasedChunkTickets
+                + " 个。");
   }
 
   private Location centerOf(AnchorRegion region) {
