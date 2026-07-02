@@ -145,7 +145,8 @@ final class FishingJob implements MaidJob, Runnable {
       return;
     }
 
-    if (!plugin.getMaidNpcService().isNear(fishingSpot, ARRIVAL_DISTANCE)) {
+    if (phase != JobPhase.RUNNING
+        && !plugin.getMaidNpcService().isNear(fishingSpot, ARRIVAL_DISTANCE)) {
       travelTicks += PERIOD_TICKS;
       if (travelTicks % MOVE_RETRY_TICKS == 0) {
         plugin.getMaidNpcService().moveTo(fishingSpot);
@@ -158,6 +159,7 @@ final class FishingJob implements MaidJob, Runnable {
 
     if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
       phase = JobPhase.RUNNING;
+      travelTicks = 0;
       startOptionalAnimation();
       plugin.getJobEventBuffer().add("到达 fishing_spot/" + name + "，开始钓鱼。");
       notifyOwner("女仆已到达 fishing_spot/" + name + "，开始钓鱼。");
