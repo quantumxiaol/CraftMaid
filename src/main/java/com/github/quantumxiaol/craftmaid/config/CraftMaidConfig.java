@@ -82,7 +82,7 @@ public record CraftMaidConfig(
             apiKey,
             getConfigString(plugin, "llm.model_name", "gpt-3.5-turbo"),
             clamp(plugin.getConfig().getDouble("llm.temperature", 0.7), 0.0, 2.0),
-            Math.max(1, plugin.getConfig().getInt("llm.max_tokens", 180)),
+            Math.max(1, plugin.getConfig().getInt("llm.max_tokens", 320)),
             Math.max(1, plugin.getConfig().getInt("llm.timeout_seconds", 30)));
 
     MaidSettings maid =

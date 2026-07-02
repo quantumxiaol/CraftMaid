@@ -17,7 +17,7 @@ CraftMaid 分成两层能力。
 * **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
 * **Job 框架骨架**：统一 `MaidJob` / `activeJob` / `JobPhase`，可以查看 `idle` / `fishing` / `chunk_keeper` / `harvest` / `following` / `guarding` 状态，并通过命令或菜单停止当前工作。
-* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。可选开启 Denizen `/npc fish` 作为表演动画，但 CraftMaid 仍负责产出和背包控制。
+* **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。可选开启实验性 Denizen `/npc fish` 作为表演动画，但 CraftMaid 仍负责产出和背包控制。
 * **ChunkKeeper MVP**：读取 `redstone_watch/<name>`，使用 Paper `addPluginChunkTicket` 保持机器所在 chunk 加载；停止 job 或插件关闭时释放 ticket。
 * **农田收割 MVP**：读取 `farm/<name>`，只处理成熟的白名单 `Ageable` 作物；每 tick 限流，产物以 all-or-nothing 方式进入女仆背包，背包满时停止且不改当前方块。
 * **单 LLM JSON Turn Loop**：玩家对话、历史记忆、环境、当前 Job 状态、最近产出和背包摘要会一起进入 LLM；LLM 必须返回 `{chat, actions}` JSON。actions 非空时插件先执行白名单 action，再用执行结果生成最终回复。
@@ -30,7 +30,7 @@ CraftMaid 分成两层能力。
 
 ## 尚未实现
 
-* **完整 Denizen 行为**：当前只可选调用 Denizen `/npc fish` 作为钓鱼表演层，还没有接 Denizen 脚本任务或 Denizen 驱动的工作流。
+* **完整 Denizen 行为**：当前只可选调用 Denizen `/npc fish` 作为实验性钓鱼表演层，还没有接 Denizen 脚本任务或 Denizen 驱动的工作流。
 * **真实鱼钩/原版钓鱼**：当前钓鱼产出由 CraftMaid 内置模拟控制，不生成原版 `FishHook` 实体，也不把 loot 权交给 Denizen。
 * **自动找水域**：钓鱼需要先设置 `region pond/<name>`，暂时不会自动扫描附近水域。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
@@ -130,7 +130,7 @@ llm:
   model_name: "gpt-3.5-turbo" # 你的模型名称，如 qwen-max
   timeout_seconds: 30
   temperature: 0.7
-  max_tokens: 180
+  max_tokens: 320
 maid:
   name: "露西" # 女仆在游戏内的名字
   master: "PlayerName" # 你的游戏 ID，女仆会对该玩家展现主人的态度
@@ -227,7 +227,7 @@ jobs:
     junk_weight: 23.0
     treasure_weight: 5.0
     treasure_enabled: true
-    denizen_animation: false # 可选 Denizen 表演层，不改变 CraftMaid 产出控制
+    denizen_animation: false # 实验性 Denizen 表演层，不改变 CraftMaid 产出控制
   chunk_keeper:
     radius_chunks: 0
     guard_with_sentinel: false
@@ -246,7 +246,7 @@ llm:
   model_name: "deepseek-v4-flash"
   timeout_seconds: 30
   temperature: 0.7
-  max_tokens: 180
+  max_tokens: 320
 conversation:
   enabled: true
   max_messages: 100
@@ -358,11 +358,11 @@ Job 状态和钓鱼控制：
 
 有 action 时，第一轮 `chat` 不会显示；插件会先执行 action，再把执行结果、更新后的 job 状态、最近工作事件和背包摘要交给同一个 LLM 生成最终回复。长期历史只记录玩家原话和最终回复，不记录内部 JSON、action result 或每条产出日志。
 
-当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`、`INSPECT_SURROUNDINGS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。`INSPECT_SURROUNDINGS` 是只读观察 action，不能和工作、跟随、护卫、召回等 action 混用。
+当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`、`INSPECT_SURROUNDINGS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。`INSPECT_SURROUNDINGS` 是只读观察 action，不能和工作、跟随、护卫、召回等 action 混用。LLM 如果输出未知 action，整轮 JSON 会被拒绝，不会显示模型在 `chat` 里的承诺文本。
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
-`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。
+`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。
 
 如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
 

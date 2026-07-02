@@ -34,13 +34,13 @@ public final class MaidActionPlanParser {
     JsonArray actionsArray = actionsElement.getAsJsonArray();
     for (JsonElement actionElement : actionsArray) {
       if (!actionElement.isJsonObject()) {
-        continue;
+        throw new IllegalArgumentException("Action must be an object.");
       }
       JsonObject actionObject = actionElement.getAsJsonObject();
-      Optional<MaidActionType> actionType =
-          MaidActionType.fromInput(stringOrBlank(actionObject, "type"));
+      String rawType = stringOrBlank(actionObject, "type");
+      Optional<MaidActionType> actionType = MaidActionType.fromInput(rawType);
       if (actionType.isEmpty()) {
-        continue;
+        throw new IllegalArgumentException("Unknown action type: " + rawType);
       }
       actions.add(
           new MaidAction(

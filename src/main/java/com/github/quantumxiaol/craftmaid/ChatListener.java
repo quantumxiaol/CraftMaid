@@ -12,6 +12,7 @@ import com.github.quantumxiaol.craftmaid.intent.MaidIntent;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntentDetector;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntentExecutor;
 import com.github.quantumxiaol.craftmaid.intent.MaidIntentResult;
+import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
 import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import java.util.List;
@@ -94,11 +95,15 @@ public class ChatListener implements Listener {
     String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
     IntentSettings intentSettings = plugin.getIntentSettings();
     boolean useJsonTurn = intentSettings.enabled() && intentSettings.llmJson();
-    if (!useJsonTurn && tryHandleFallbackIntent(player, playerSpeech, addressedByName)) {
+    if (tryHandleLocalStop(player, playerSpeech)) {
       return;
     }
 
-    if (!useJsonTurn && isCoolingDown(player.getUniqueId())) {
+    if (isCoolingDown(player.getUniqueId())) {
+      return;
+    }
+
+    if (!useJsonTurn && tryHandleFallbackIntent(player, playerSpeech, addressedByName)) {
       return;
     }
 
@@ -306,6 +311,55 @@ public class ChatListener implements Listener {
                     Component.text(plugin.getMaidName() + " 暂时没听清，请再说一次。", NamedTextColor.RED));
               }
             });
+  }
+
+  private boolean tryHandleLocalStop(Player player, String playerSpeech) {
+    if (!plugin.getIntentSettings().enabled() || !canControlMaid(player)) {
+      return false;
+    }
+    if (!isLocalStopSpeech(playerSpeech)) {
+      return false;
+    }
+
+    JobActionResult result = plugin.getJobService().stopActiveJob("好的主人，我先停下手头的事。");
+    player.sendMessage(
+        Component.text(
+            result.success() ? result.message() : "当前没有正在运行的 job。",
+            result.success() ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.YELLOW));
+    return true;
+  }
+
+  private boolean isLocalStopSpeech(String playerSpeech) {
+    if (playerSpeech == null || playerSpeech.isBlank()) {
+      return false;
+    }
+    String normalized = playerSpeech.toLowerCase(Locale.ROOT).replaceAll("[\\s,，。.!！?？~～、]+", "");
+    return normalized.equals("停")
+        || normalized.equals("停下")
+        || normalized.equals("停一下")
+        || normalized.equals("停止")
+        || normalized.equals("停止工作")
+        || normalized.equals("别忙了")
+        || normalized.equals("不用忙了")
+        || normalized.equals("先停下")
+        || normalized.equals("停手")
+        || normalized.equals("别钓了")
+        || normalized.equals("别钓鱼了")
+        || normalized.equals("停止钓鱼")
+        || normalized.equals("别收了")
+        || normalized.equals("别收田了")
+        || normalized.equals("停止收田")
+        || normalized.equals("停止收割")
+        || normalized.equals("别看机器了")
+        || normalized.equals("停止看机器");
+  }
+
+  private boolean canControlMaid(Player player) {
+    if (!plugin.getIntentSettings().masterOnly()) {
+      return true;
+    }
+    return player.hasPermission("craftmaid.admin")
+        || player.getName().equalsIgnoreCase(plugin.getMasterName());
   }
 
   private boolean tryHandleFallbackIntent(

@@ -5,7 +5,7 @@ llm:
   model_name: "deepseek-v4-flash"
   timeout_seconds: 30
   temperature: 0.7
-  max_tokens: 180
+  max_tokens: 320
 maid:
   name: "露西"
   master: "PlayerName"
@@ -193,7 +193,7 @@ jobs:
     junk_weight: 23.0
     treasure_weight: 5.0
     treasure_enabled: true
-    # 预留给 Denizen 表演层；不改变 CraftMaid 的 loot 和背包控制。
+    # 实验性 Denizen 表演层；通过 /npc fish 命令驱动，不改变 CraftMaid 的 loot 和背包控制。
     denizen_animation: false
   chunk_keeper:
     # 0 表示只加载 redstone_watch 所在 chunk；1 表示 3x3 chunks。
