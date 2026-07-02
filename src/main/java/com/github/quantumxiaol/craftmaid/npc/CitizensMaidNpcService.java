@@ -39,7 +39,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private static final String SENTINEL_PLUGIN = "Sentinel";
   private static final String SENTINEL_TRAIT_CLASS = "org.mcmonkey.sentinel.SentinelTrait";
   private static final float DEFAULT_NAVIGATOR_SPEED = 1.0F;
-  private static final double DIRECTED_TELEPORT_ARRIVAL_DISTANCE = 2.5;
   private static final long FIGHTBACK_TARGET_TICKS = 15L * 20L;
 
   private final CraftMaid plugin;
@@ -290,13 +289,13 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc == null) {
       return false;
     }
-    configureDirectedNavigation(npc);
-    if (shouldTeleportForDirectedMove(npc, location)) {
-      teleportNearLocation(npc, location);
-      if (isNear(location, DIRECTED_TELEPORT_ARRIVAL_DISTANCE)) {
-        return true;
-      }
+    if (npc.getEntity() == null
+        || npc.getEntity().getLocation().getWorld() == null
+        || !npc.getEntity().getLocation().getWorld().equals(location.getWorld())) {
+      return false;
     }
+
+    configureDirectedNavigation(npc);
     npc.getNavigator().cancelNavigation();
     npc.getNavigator().setTarget(location);
     return true;
@@ -727,56 +726,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private void resetNavigatorSpeed(NPC npc) {
     npc.getNavigator().getLocalParameters().speed(DEFAULT_NAVIGATOR_SPEED);
-  }
-
-  private boolean shouldTeleportForDirectedMove(NPC npc, Location target) {
-    if (npc.getEntity() == null || target.getWorld() == null) {
-      return false;
-    }
-    Location npcLocation = npc.getEntity().getLocation();
-    if (npcLocation.getWorld() == null || !npcLocation.getWorld().equals(target.getWorld())) {
-      return true;
-    }
-
-    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
-    double teleportDistance = Math.max(16.0, settings.teleportDistance());
-    return npcLocation.distanceSquared(target) >= teleportDistance * teleportDistance
-        || Math.abs(npcLocation.getY() - target.getY()) >= 16.0;
-  }
-
-  private void teleportNearLocation(NPC npc, Location target) {
-    Location safeTarget = findSafeTargetLocation(target);
-    npc.getNavigator().cancelNavigation();
-    npc.teleport(safeTarget, PlayerTeleportEvent.TeleportCause.PLUGIN);
-    followLastLocation = safeTarget;
-    followStuckTicks = 0;
-  }
-
-  private Location findSafeTargetLocation(Location target) {
-    Location base = target.clone();
-    base.setPitch(0.0F);
-    double[][] offsets = {
-      {0.0, 0.0},
-      {1.0, 0.0},
-      {-1.0, 0.0},
-      {0.0, 1.0},
-      {0.0, -1.0},
-      {2.0, 0.0},
-      {-2.0, 0.0},
-      {0.0, 2.0},
-      {0.0, -2.0}
-    };
-
-    for (double[] offset : offsets) {
-      Location candidate = base.clone().add(offset[0], 0.0, offset[1]);
-      Location safe = findSafeVerticalLocation(candidate);
-      if (safe != null) {
-        safe.setYaw(base.getYaw());
-        safe.setPitch(0.0F);
-        return safe;
-      }
-    }
-    return centerOnBlock(base);
   }
 
   private void updateFollowTarget(NPC npc, Player player) {
