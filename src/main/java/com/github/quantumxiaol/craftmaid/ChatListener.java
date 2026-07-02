@@ -2,7 +2,6 @@ package com.github.quantumxiaol.craftmaid;
 
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig.IntentSettings;
 import com.github.quantumxiaol.craftmaid.context.MaidRuntimeContextCollector;
-import com.github.quantumxiaol.craftmaid.context.WorldContextCollector;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
 import com.github.quantumxiaol.craftmaid.intent.MaidActionExecutionResult;
@@ -33,7 +32,6 @@ import org.bukkit.event.Listener;
 
 public class ChatListener implements Listener {
   private final CraftMaid plugin;
-  private final WorldContextCollector worldContextCollector = new WorldContextCollector();
   private final MaidRuntimeContextCollector runtimeContextCollector;
   private final MaidActionPlanParser actionPlanParser = new MaidActionPlanParser();
   private final MaidActionExecutor actionExecutor;
@@ -335,8 +333,7 @@ public class ChatListener implements Listener {
 
   private String buildPlainChatPrompt(Player player, String playerSpeech) {
     String masterName = plugin.getMasterName();
-    String environmentStr =
-        worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
+    String environmentStr = plugin.getPerceptionService().collectForPrompt(player);
     boolean isMaster = player.getName().equalsIgnoreCase(masterName);
     String identityStr = isMaster ? "主人" : "其他玩家";
     return String.format(
@@ -350,8 +347,7 @@ public class ChatListener implements Listener {
 
   private String buildPlanPrompt(Player player, String playerSpeech) {
     String masterName = plugin.getMasterName();
-    String environmentStr =
-        worldContextCollector.collectForPrompt(player, plugin.getMaxContextEntities());
+    String environmentStr = plugin.getPerceptionService().collectForPrompt(player);
     boolean isMaster = player.getName().equalsIgnoreCase(masterName);
     String identityStr = isMaster ? "主人" : "其他玩家";
     return """
@@ -408,6 +404,7 @@ public class ChatListener implements Listener {
         - GUARD_HERE
         - JOB_STOP(target=current)
         - JOB_STATUS
+        - INSPECT_SURROUNDINGS
 
         规则：
         1. 如果玩家只是闲聊、问候、提问，输出自然角色回复到 chat，actions=[]。
@@ -423,8 +420,10 @@ public class ChatListener implements Listener {
         11. 如果玩家说“守在这里”“守住这里”“在这里警戒”，输出 GUARD_HERE；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_HERE。
         12. 如果玩家说“停止护卫”“别打了”“停止战斗”“不用保护我了”，输出 GUARD_STOP。
         13. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
-        14. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
-        15. chat 最多 80 个中文字符，必须是完整句子。
+        14. 如果玩家询问当前位置、周围有什么、建筑/房间/农田/水域/红石机器是什么，且当前环境里没有方块统计，输出 INSPECT_SURROUNDINGS，chat=""。
+        15. INSPECT_SURROUNDINGS 是只读观察，不能和工作、跟随、护卫、召回等 action 混用。
+        16. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
+        17. chat 最多 80 个中文字符，必须是完整句子。
         """;
   }
 
@@ -445,6 +444,7 @@ public class ChatListener implements Listener {
 
         请根据动作结果和新状态，用女仆口吻简短回复玩家。
         不要复述 JOB_STOP、success、failure、action、服务器、插件、JSON 等内部字段。
+        如果动作结果是环境观察，请用“像是/看起来/我猜”描述场景，不要说得过于绝对。
         这次 actions 必须为空数组，不要再请求任何 action。
         """
         .formatted(playerSpeech, actionResult.summary(), runtimeContextCollector.collect(player));
@@ -500,6 +500,9 @@ public class ChatListener implements Listener {
     }
     if (summary.contains("开始看守")) {
       return "好的主人，我会看住那边。";
+    }
+    if (summary.contains("INSPECT_SURROUNDINGS")) {
+      return "主人，我看了一下，周围的情况已经记下来了。";
     }
     return "好的主人。";
   }

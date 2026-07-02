@@ -11,7 +11,7 @@ CraftMaid 分成两层能力。
 ## 当前能力
 
 * **AI 对话**：玩家在公屏提到女仆名字后触发回复；喊过一次名字后，默认 180 秒内同一玩家可以继续免唤醒对话。
-* **环境上下文**：对话时会采集玩家周围的时间、天气、附近实体和怪物等信息写入提示词。
+* **环境感知**：对话时会采集时间、天气、附近实体分组和玩家视线目标；LLM 还可以通过只读 `INSPECT_SURROUNDINGS` action 按需获取周围方块统计、材料 Top、类别比例和场景推测。
 * **多轮记忆**：按玩家 UUID 管理历史；只记录玩家原话和女仆最终回复。超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
 * **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
@@ -173,8 +173,30 @@ maid:
 chat:
   cooldown_seconds: 3 # 同一玩家触发 AI 回复的冷却时间
   followup_seconds: 180 # 喊过女仆名字后，同一玩家后续发言免唤醒的滑动窗口；0 表示关闭
-  max_context_entities: 8 # 写入提示词的周围实体数量上限
+  max_context_entities: 8 # 旧版实体上下文上限；新版主要使用 perception.entities.max_entities
   reply_prefix: "[{name}] "
+perception:
+  enabled: true
+  entities:
+    enabled: true
+    radius_xz: 12
+    radius_y: 6
+    max_entities: 24
+    include_passive: true
+    include_neutral: true
+    include_items: true
+  blocks:
+    enabled: true
+    mode: on_demand # on_demand=INSPECT_SURROUNDINGS 时扫描；always=每次聊天扫描；disabled=不扫描方块
+    radius_xz: 8
+    up: 3
+    down: 3
+    top_materials: 8
+    max_blocks_scanned: 2500
+    cache_seconds: 10
+  target:
+    enabled: true
+    max_distance: 10
 intent:
   enabled: true # 有限自然语言意图
   master_only: true # 只有 maid.master 或 craftmaid.admin 可以用聊天触发工作
@@ -238,7 +260,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`conversation.summary.*` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`perception`、`conversation.summary.*` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -336,9 +358,9 @@ Job 状态和钓鱼控制：
 
 有 action 时，第一轮 `chat` 不会显示；插件会先执行 action，再把执行结果、更新后的 job 状态、最近工作事件和背包摘要交给同一个 LLM 生成最终回复。长期历史只记录玩家原话和最终回复，不记录内部 JSON、action result 或每条产出日志。
 
-当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。
+当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`、`INSPECT_SURROUNDINGS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。`INSPECT_SURROUNDINGS` 是只读观察 action，不能和工作、跟随、护卫、召回等 action 混用。
 
-每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
+每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
 `intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。
 

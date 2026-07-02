@@ -122,8 +122,32 @@ chat:
   cooldown_seconds: 3
   # 玩家喊过女仆名字后，后续多少秒内同一玩家发言无需再带名字也会触发回复；按玩家最后一次发言滑动续期，0 表示关闭。
   followup_seconds: 180
+  # 旧版实体上下文上限；新版主要使用 perception.entities.max_entities。
   max_context_entities: 8
   reply_prefix: "[{name}] "
+perception:
+  enabled: true
+  entities:
+    enabled: true
+    radius_xz: 12
+    radius_y: 6
+    max_entities: 24
+    include_passive: true
+    include_neutral: true
+    include_items: true
+  blocks:
+    enabled: true
+    # on_demand=LLM 请求 INSPECT_SURROUNDINGS 时才扫描；always=每次聊天都扫描；disabled=不扫描方块。
+    mode: on_demand
+    radius_xz: 8
+    up: 3
+    down: 3
+    top_materials: 8
+    max_blocks_scanned: 2500
+    cache_seconds: 10
+  target:
+    enabled: true
+    max_distance: 10
 intent:
   # 有限自然语言意图：由同一个 LLM 输出 JSON action plan，再由 Java 白名单执行；不是开放式 tool call。
   enabled: true

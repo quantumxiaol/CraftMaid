@@ -16,6 +16,7 @@ import com.github.quantumxiaol.craftmaid.llm.LlmClient;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcServices;
+import com.github.quantumxiaol.craftmaid.perception.MaidPerceptionService;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -32,6 +33,7 @@ public final class CraftMaid extends JavaPlugin {
   private MaidMenuService maidMenuService;
   private MaidCombatPolicy combatPolicy;
   private MaidCombatBuffService combatBuffService;
+  private MaidPerceptionService perceptionService;
 
   @Override
   public void onEnable() {
@@ -47,6 +49,7 @@ public final class CraftMaid extends JavaPlugin {
     maidNpcService = MaidNpcServices.create(this);
     maidMenuService = new MaidMenuService(this);
     combatBuffService = new MaidCombatBuffService(this);
+    perceptionService = new MaidPerceptionService(this);
     if (!maidNpcService.isAvailable()) {
       getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
     }
@@ -208,6 +211,14 @@ public final class CraftMaid extends JavaPlugin {
 
   public CraftMaidConfig.IntentSettings getIntentSettings() {
     return config.intent();
+  }
+
+  public CraftMaidConfig.PerceptionSettings getPerceptionSettings() {
+    return config.perception();
+  }
+
+  public MaidPerceptionService getPerceptionService() {
+    return perceptionService;
   }
 
   public int getConversationSummaryMaxTokens() {

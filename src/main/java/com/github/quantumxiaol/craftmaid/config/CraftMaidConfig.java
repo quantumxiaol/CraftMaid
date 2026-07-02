@@ -8,6 +8,7 @@ public record CraftMaidConfig(
     MaidSettings maid,
     ChatSettings chat,
     IntentSettings intent,
+    PerceptionSettings perception,
     ConversationSettings conversation,
     JobSettings jobs,
     String systemPrompt) {
@@ -193,6 +194,31 @@ public record CraftMaidConfig(
             Math.max(120, plugin.getConfig().getInt("intent.final_max_tokens", 480)),
             clamp(plugin.getConfig().getDouble("intent.final_temperature", 0.6), 0.0, 2.0));
 
+    PerceptionSettings perception =
+        new PerceptionSettings(
+            plugin.getConfig().getBoolean("perception.enabled", true),
+            new EntityPerceptionSettings(
+                plugin.getConfig().getBoolean("perception.entities.enabled", true),
+                Math.max(1, plugin.getConfig().getInt("perception.entities.radius_xz", 12)),
+                Math.max(1, plugin.getConfig().getInt("perception.entities.radius_y", 6)),
+                Math.max(1, plugin.getConfig().getInt("perception.entities.max_entities", 24)),
+                plugin.getConfig().getBoolean("perception.entities.include_passive", true),
+                plugin.getConfig().getBoolean("perception.entities.include_neutral", true),
+                plugin.getConfig().getBoolean("perception.entities.include_items", true)),
+            new BlockPerceptionSettings(
+                plugin.getConfig().getBoolean("perception.blocks.enabled", true),
+                getConfigString(plugin, "perception.blocks.mode", "on_demand"),
+                Math.max(1, plugin.getConfig().getInt("perception.blocks.radius_xz", 8)),
+                Math.max(0, plugin.getConfig().getInt("perception.blocks.up", 3)),
+                Math.max(0, plugin.getConfig().getInt("perception.blocks.down", 3)),
+                Math.max(1, plugin.getConfig().getInt("perception.blocks.top_materials", 8)),
+                Math.max(
+                    1, plugin.getConfig().getInt("perception.blocks.max_blocks_scanned", 2500)),
+                Math.max(0, plugin.getConfig().getInt("perception.blocks.cache_seconds", 10))),
+            new TargetPerceptionSettings(
+                plugin.getConfig().getBoolean("perception.target.enabled", true),
+                Math.max(1, plugin.getConfig().getInt("perception.target.max_distance", 10))));
+
     ConversationSettings conversation =
         new ConversationSettings(
             plugin.getConfig().getBoolean("conversation.enabled", true),
@@ -226,7 +252,8 @@ public record CraftMaidConfig(
         plugin.getConfig().getString("maid.system_prompt", DEFAULT_SYSTEM_PROMPT);
     String systemPrompt = renderSystemPrompt(rawSystemPrompt, maid);
 
-    return new CraftMaidConfig(llm, maid, chat, intent, conversation, jobs, systemPrompt);
+    return new CraftMaidConfig(
+        llm, maid, chat, intent, perception, conversation, jobs, systemPrompt);
   }
 
   private static String getConfigString(JavaPlugin plugin, String path, String defaultValue) {
@@ -325,6 +352,33 @@ public record CraftMaidConfig(
       double planTemperature,
       int finalMaxTokens,
       double finalTemperature) {}
+
+  public record PerceptionSettings(
+      boolean enabled,
+      EntityPerceptionSettings entities,
+      BlockPerceptionSettings blocks,
+      TargetPerceptionSettings target) {}
+
+  public record EntityPerceptionSettings(
+      boolean enabled,
+      int radiusXz,
+      int radiusY,
+      int maxEntities,
+      boolean includePassive,
+      boolean includeNeutral,
+      boolean includeItems) {}
+
+  public record BlockPerceptionSettings(
+      boolean enabled,
+      String mode,
+      int radiusXz,
+      int up,
+      int down,
+      int topMaterials,
+      int maxBlocksScanned,
+      int cacheSeconds) {}
+
+  public record TargetPerceptionSettings(boolean enabled, int maxDistance) {}
 
   public record ConversationSettings(
       boolean enabled,

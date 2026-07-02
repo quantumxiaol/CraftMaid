@@ -18,7 +18,8 @@ public enum MaidActionType {
   GUARD_STOP,
   GUARD_HERE,
   JOB_STOP,
-  JOB_STATUS;
+  JOB_STATUS,
+  INSPECT_SURROUNDINGS;
 
   public boolean isStart() {
     return this == FISHING_START
@@ -40,6 +41,10 @@ public enum MaidActionType {
 
   public boolean canFollowStopInPlan() {
     return isStart() || this == RECALL;
+  }
+
+  public boolean isReadOnly() {
+    return this == JOB_STATUS || this == INSPECT_SURROUNDINGS;
   }
 
   public static Optional<MaidActionType> fromInput(String input) {

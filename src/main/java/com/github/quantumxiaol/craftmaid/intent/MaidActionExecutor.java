@@ -20,7 +20,7 @@ public final class MaidActionExecutor {
     if (actions.isEmpty()) {
       return new MaidActionExecutionResult(false, List.of());
     }
-    if (!canControl(player)) {
+    if (!allReadOnly(actions) && !canControl(player)) {
       return new MaidActionExecutionResult(true, List.of("ACTION_DENIED: 只有主人或管理员可以让女仆执行工作。"));
     }
 
@@ -39,7 +39,9 @@ public final class MaidActionExecutor {
               + " - "
               + result.message();
       results.add(line);
-      plugin.getJobEventBuffer().add("动作执行结果 " + line);
+      if (!action.type().isReadOnly()) {
+        plugin.getJobEventBuffer().add("动作执行结果 " + line);
+      }
     }
     return new MaidActionExecutionResult(true, List.copyOf(results));
   }
@@ -70,6 +72,8 @@ public final class MaidActionExecutor {
       case GUARD_HERE -> startGuardingHere(player);
       case JOB_STOP -> plugin.getJobService().stopActiveJob("好的主人，我先停下手头的事。");
       case JOB_STATUS -> JobActionResult.success(plugin.getJobService().statusLine());
+      case INSPECT_SURROUNDINGS ->
+          JobActionResult.success(plugin.getPerceptionService().inspectSurroundings(player));
     };
   }
 
@@ -157,6 +161,9 @@ public final class MaidActionExecutor {
     if (actions.size() == 1) {
       return "";
     }
+    if (actions.stream().anyMatch(action -> action.type().isReadOnly())) {
+      return "只读观察 action 不能和其他 action 合并。";
+    }
 
     MaidAction first = actions.get(0);
     MaidAction second = actions.get(1);
@@ -164,6 +171,10 @@ public final class MaidActionExecutor {
       return "只允许单个 action，或 STOP + START/RECALL 的切换组合。";
     }
     return "";
+  }
+
+  private boolean allReadOnly(List<MaidAction> actions) {
+    return actions.stream().allMatch(action -> action.type().isReadOnly());
   }
 
   private boolean canControl(Player player) {
