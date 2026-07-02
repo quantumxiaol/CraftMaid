@@ -240,6 +240,20 @@ public record CraftMaidConfig(
 
     JobSettings jobs =
         new JobSettings(
+            new JobNavigationSettings(
+                clamp(plugin.getConfig().getDouble("jobs.navigation.speed", 1.5), 0.1, 3.0),
+                Math.max(1, plugin.getConfig().getInt("jobs.navigation.update_ticks", 20)),
+                clamp(
+                    plugin.getConfig().getDouble("jobs.navigation.arrival_distance", 3.0),
+                    0.5,
+                    16.0),
+                Math.max(
+                    5, plugin.getConfig().getInt("jobs.navigation.arrival_timeout_seconds", 180)),
+                Math.max(20, plugin.getConfig().getInt("jobs.navigation.retry_ticks", 100)),
+                clamp(
+                    plugin.getConfig().getDouble("jobs.navigation.straight_line_distance", 12.0),
+                    0.0,
+                    128.0)),
             new FishingSettings(
                 Math.max(20, plugin.getConfig().getInt("jobs.fishing.min_wait_ticks", 100)),
                 Math.max(20, plugin.getConfig().getInt("jobs.fishing.max_wait_ticks", 240)),
@@ -403,7 +417,18 @@ public record CraftMaidConfig(
       String persistFile) {}
 
   public record JobSettings(
-      FishingSettings fishing, ChunkKeeperSettings chunkKeeper, HarvestSettings harvest) {}
+      JobNavigationSettings navigation,
+      FishingSettings fishing,
+      ChunkKeeperSettings chunkKeeper,
+      HarvestSettings harvest) {}
+
+  public record JobNavigationSettings(
+      double speed,
+      int updateTicks,
+      double arrivalDistance,
+      int arrivalTimeoutSeconds,
+      int retryTicks,
+      double straightLineDistance) {}
 
   public record FishingSettings(
       int minWaitTicks,

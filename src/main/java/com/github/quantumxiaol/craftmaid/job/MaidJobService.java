@@ -73,7 +73,10 @@ public final class MaidJobService {
       return JobActionResult.failure("缺少完整 region farm/" + name + "。");
     }
 
-    return startJob(new HarvestFarmJob(plugin, this, player.getUniqueId(), name, farm));
+    Location harvestSpot =
+        plugin.getAnchorService().getLocationOrNull(AnchorType.HARVEST_SPOT, name);
+    return startJob(
+        new HarvestFarmJob(plugin, this, player.getUniqueId(), name, farm, harvestSpot));
   }
 
   public JobActionResult startHarvestAuto(Player player) {
@@ -99,7 +102,13 @@ public final class MaidJobService {
       return JobActionResult.failure(policy.blockedMessage(job.type()));
     }
     policy.applyBeforeStart(plugin);
-    plugin.getMaidNpcService().stopMoving();
+    if (policy.requiresExclusiveBodyControl()
+        && !plugin.getMaidNpcService().prepareForJobControl(true)) {
+      return JobActionResult.failure("无法取得女仆 NPC 的身体控制权，请先停止护卫或重生成 NPC。");
+    }
+    if (!policy.requiresExclusiveBodyControl()) {
+      plugin.getMaidNpcService().stopMoving();
+    }
 
     JobActionResult startResult = job.start();
     if (!startResult.success()) {

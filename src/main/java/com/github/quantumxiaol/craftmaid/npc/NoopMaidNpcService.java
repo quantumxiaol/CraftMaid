@@ -95,13 +95,28 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean prepareForJobControl(boolean clearGuarding) {
+    return false;
+  }
+
+  @Override
   public boolean moveTo(Location location) {
+    return false;
+  }
+
+  @Override
+  public boolean isNavigating() {
     return false;
   }
 
   @Override
   public boolean isNear(Location location, double distance) {
     return false;
+  }
+
+  @Override
+  public double distanceSquaredTo(Location location) {
+    return Double.POSITIVE_INFINITY;
   }
 
   @Override

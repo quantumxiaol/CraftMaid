@@ -22,9 +22,6 @@ final class FishingJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 20;
   private static final int MAX_POND_VOLUME = 8192;
   private static final int MAX_CHUNK_TICKETS = 64;
-  private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
-  private static final int MOVE_RETRY_TICKS = 60;
-  private static final double ARRIVAL_DISTANCE = 2.5;
 
   private final CraftMaid plugin;
   private final MaidJobService jobService;
@@ -36,10 +33,10 @@ final class FishingJob implements MaidJob, Runnable {
   private final JobChunkTickets chunkTickets;
 
   private BukkitTask task;
+  private JobTravelController travelController;
   private JobPhase phase = JobPhase.STARTING;
   private boolean stopped;
   private boolean animationStarted;
-  private int travelTicks;
   private int waitTicks;
   private int swingTicks;
   private int catchCount;
@@ -116,7 +113,14 @@ final class FishingJob implements MaidJob, Runnable {
       chunkTickets.release();
       return JobActionResult.failure("pond/" + name + " 里没有找到水方块。");
     }
-    if (!plugin.getMaidNpcService().moveTo(fishingSpot)) {
+    Location standPoint = JobNavigationTargets.findSafeVerticalLocation(fishingSpot);
+    if (standPoint == null) {
+      phase = JobPhase.FAILED;
+      chunkTickets.release();
+      return JobActionResult.failure("fishing_spot/" + name + " 不是安全站位，请设置在水边平地上。");
+    }
+    travelController = new JobTravelController(plugin, standPoint);
+    if (!plugin.getMaidNpcService().moveTo(standPoint)) {
       phase = JobPhase.FAILED;
       chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 fishing_spot/" + name + "。");
@@ -145,13 +149,8 @@ final class FishingJob implements MaidJob, Runnable {
       return;
     }
 
-    if (phase != JobPhase.RUNNING
-        && !plugin.getMaidNpcService().isNear(fishingSpot, ARRIVAL_DISTANCE)) {
-      travelTicks += PERIOD_TICKS;
-      if (travelTicks % MOVE_RETRY_TICKS == 0) {
-        plugin.getMaidNpcService().moveTo(fishingSpot);
-      }
-      if (travelTicks >= ARRIVAL_TIMEOUT_TICKS) {
+    if (phase != JobPhase.RUNNING && !travelController.hasArrived()) {
+      if (!travelController.tickTravelling(PERIOD_TICKS)) {
         fail("钓鱼任务停止：女仆一直没有到达 fishing_spot/" + name + "。");
       }
       return;
@@ -159,7 +158,7 @@ final class FishingJob implements MaidJob, Runnable {
 
     if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
       phase = JobPhase.RUNNING;
-      travelTicks = 0;
+      travelController.reset();
       startOptionalAnimation();
       plugin.getJobEventBuffer().add("到达 fishing_spot/" + name + "，开始钓鱼。");
       notifyOwner("女仆已到达 fishing_spot/" + name + "，开始钓鱼。");

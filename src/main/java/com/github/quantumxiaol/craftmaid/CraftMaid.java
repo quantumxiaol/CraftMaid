@@ -233,6 +233,10 @@ public final class CraftMaid extends JavaPlugin {
     return config.jobs();
   }
 
+  public CraftMaidConfig.JobNavigationSettings getJobNavigationSettings() {
+    return config.jobs().navigation();
+  }
+
   public CraftMaidConfig.FishingSettings getFishingSettings() {
     return config.jobs().fishing();
   }

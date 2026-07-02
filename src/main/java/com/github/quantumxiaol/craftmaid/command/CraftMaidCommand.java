@@ -35,7 +35,7 @@ public class CraftMaidCommand implements TabExecutor {
   private static final List<String> HARVEST_NAMES = List.of("main", "default", "wheat_field");
   private static final List<String> ANCHOR_ACTIONS = List.of("set", "list", "remove");
   private static final List<String> ANCHOR_TYPES =
-      List.of("home", "fishing_spot", "chest", "guard_post", "redstone_watch");
+      List.of("home", "fishing_spot", "harvest_spot", "chest", "guard_post", "redstone_watch");
   private static final List<String> ANCHOR_NAME_SUGGESTIONS =
       List.of("default", "main", "drops", "crops", "tools", "gate");
   private static final List<String> REGION_ACTIONS = List.of("set", "list", "remove", "show");
@@ -484,7 +484,7 @@ public class CraftMaidCommand implements TabExecutor {
     if (args.length < 4) {
       sender.sendMessage(
           Component.text(
-              "用法: /craftmaid anchor set <home|fishing_spot|chest|guard_post|redstone_watch> <name>",
+              "用法: /craftmaid anchor set <home|fishing_spot|harvest_spot|chest|guard_post|redstone_watch> <name>",
               NamedTextColor.YELLOW));
       return;
     }
@@ -506,7 +506,7 @@ public class CraftMaidCommand implements TabExecutor {
     if (args.length < 4) {
       sender.sendMessage(
           Component.text(
-              "用法: /craftmaid anchor remove <home|fishing_spot|chest|guard_post|redstone_watch> <name>",
+              "用法: /craftmaid anchor remove <home|fishing_spot|harvest_spot|chest|guard_post|redstone_watch> <name>",
               NamedTextColor.YELLOW));
       return;
     }

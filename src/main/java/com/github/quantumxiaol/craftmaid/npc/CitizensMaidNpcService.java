@@ -281,6 +281,27 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean prepareForJobControl(boolean clearGuarding) {
+    stopFollowing();
+    stopFishingAnimation();
+    boolean guardCleared = true;
+    if (clearGuarding) {
+      NPC npc = getStoredNpcOrNull();
+      if (npc != null) {
+        boolean sentinelAvailable = isGuardAvailable();
+        guardCleared = clearSentinelGuardingState(true, true) || !sentinelAvailable;
+      }
+    } else {
+      stopMoving();
+    }
+    followLastLocation = null;
+    followStuckTicks = 0;
+    followStuckRetries = 0;
+    followNextTeleportAtMillis = 0L;
+    return guardCleared;
+  }
+
+  @Override
   public boolean moveTo(Location location) {
     if (location == null || location.getWorld() == null) {
       return false;
@@ -306,6 +327,12 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean isNavigating() {
+    NPC npc = getStoredNpcOrNull();
+    return npc != null && npc.isSpawned() && npc.getNavigator().isNavigating();
+  }
+
+  @Override
   public boolean isNear(Location location, double distance) {
     NPC npc = getStoredNpcOrNull();
     if (npc == null || !npc.isSpawned() || npc.getEntity() == null || location == null) {
@@ -316,6 +343,19 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
     return npcLocation.distanceSquared(location) <= distance * distance;
+  }
+
+  @Override
+  public double distanceSquaredTo(Location location) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null || !npc.isSpawned() || npc.getEntity() == null || location == null) {
+      return Double.POSITIVE_INFINITY;
+    }
+    Location npcLocation = npc.getEntity().getLocation();
+    if (npcLocation.getWorld() == null || !npcLocation.getWorld().equals(location.getWorld())) {
+      return Double.POSITIVE_INFINITY;
+    }
+    return npcLocation.distanceSquared(location);
   }
 
   @Override
@@ -646,11 +686,18 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean stopGuarding() {
+    return clearSentinelGuardingState(true, true);
+  }
+
+  private boolean clearSentinelGuardingState(boolean stopNavigation, boolean warnOnFailure) {
     cancelGuardFightbackTargets();
+    guarding = false;
+    plugin.getMaidCombatBuffService().stop();
     NPC npc = getStoredNpcOrNull();
     if (npc == null || !isGuardAvailable()) {
-      guarding = false;
-      plugin.getMaidCombatBuffService().stop();
+      if (stopNavigation) {
+        stopMoving();
+      }
       return false;
     }
 
@@ -658,12 +705,17 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       Object trait = getSentinelTrait(npc);
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       cleanupSentinelCombat(trait);
-      guarding = false;
-      plugin.getMaidCombatBuffService().stop();
-      stopMoving();
+      if (stopNavigation) {
+        stopMoving();
+      }
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
-      plugin.getLogger().warning("停止 Sentinel 护卫失败: " + rootMessage(ex));
+      if (warnOnFailure) {
+        plugin.getLogger().warning("停止 Sentinel 护卫失败: " + rootMessage(ex));
+      }
+      if (stopNavigation) {
+        stopMoving();
+      }
       return false;
     }
   }
@@ -721,12 +773,12 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private void configureDirectedNavigation(NPC npc) {
-    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
+    CraftMaidConfig.JobNavigationSettings settings = plugin.getJobNavigationSettings();
     var parameters = npc.getNavigator().getLocalParameters();
     parameters.speed((float) settings.speed());
-    parameters.updatePathRate(Math.max(5, settings.updateTicks()));
-    parameters.distanceMargin(1.5);
-    parameters.pathDistanceMargin(1.5);
+    parameters.updatePathRate(settings.updateTicks());
+    parameters.distanceMargin(settings.arrivalDistance());
+    parameters.pathDistanceMargin(settings.arrivalDistance());
     parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
     parameters.destinationTeleportMargin(-1.0);
     parameters.avoidWater(true);

@@ -191,6 +191,15 @@ conversation:
     enabled: false
     file: "conversations.json"
 jobs:
+  navigation:
+    # 固定点工作导航参数，和跟随主人分开配置。
+    speed: 1.5
+    update_ticks: 20
+    arrival_distance: 3.0
+    arrival_timeout_seconds: 180
+    # travelling 阶段每隔多少 tick 检查一次是否卡住；只有没进展时才重发目标。
+    retry_ticks: 100
+    straight_line_distance: 12.0
   fishing:
     # 每次模拟上钩的等待 tick，20 tick 约等于 1 秒。
     min_wait_ticks: 100

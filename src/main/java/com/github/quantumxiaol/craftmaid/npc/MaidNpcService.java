@@ -45,9 +45,15 @@ public interface MaidNpcService {
 
   boolean stopMoving();
 
+  boolean prepareForJobControl(boolean clearGuarding);
+
   boolean moveTo(Location location);
 
+  boolean isNavigating();
+
   boolean isNear(Location location, double distance);
+
+  double distanceSquaredTo(Location location);
 
   boolean lookAt(Location location);
 

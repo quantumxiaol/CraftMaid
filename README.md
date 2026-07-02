@@ -224,6 +224,13 @@ conversation:
     enabled: false # true 时保存到 plugins/CraftMaid/conversations.json
     file: "conversations.json"
 jobs:
+  navigation:
+    speed: 1.5 # 固定点工作导航速度，和跟随主人分开配置
+    update_ticks: 20
+    arrival_distance: 3.0
+    arrival_timeout_seconds: 180
+    retry_ticks: 100 # 只有没进展或导航停止时才重发目标
+    straight_line_distance: 12.0
   fishing:
     min_wait_ticks: 100
     max_wait_ticks: 240
@@ -264,7 +271,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`perception`、`conversation.summary.*` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`perception`、`conversation.summary.*`、`jobs.navigation` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -300,7 +307,7 @@ conversation:
 
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
 
-anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田收割已经使用 `farm`，ChunkKeeper 已经使用 `redstone_watch`；箱子整理还只是数据准备。
+anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田收割已经使用 `farm`，并可选使用 `harvest_spot` 指定田边站位；ChunkKeeper 已经使用 `redstone_watch`；箱子整理还只是数据准备。
 
 单点 anchor 用于“女仆站在哪里 / 去哪里 / 从哪里交互”：
 
@@ -308,6 +315,7 @@ anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、
 /craftmaid anchor list
 /craftmaid anchor set home default
 /craftmaid anchor set fishing_spot main
+/craftmaid anchor set harvest_spot wheat_field
 /craftmaid anchor set chest drops
 /craftmaid anchor set guard_post gate
 /craftmaid anchor set redstone_watch iron_farm
@@ -331,7 +339,7 @@ anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、
 
 `region show` 会在长方体 12 条边上短暂显示粒子边框，只对执行命令的玩家可见。为了避免误刷大量粒子，过大的区域会拒绝显示。
 
-当前推荐的 anchor 类型是 `home`、`fishing_spot`、`chest`、`guard_post`、`redstone_watch`；region 类型是 `farm`、`pond`、`redstone`。名称只能使用小写字母、数字、下划线或连字符。右键菜单和自然语言 intent 会优先使用 `default`；如果没有 `default` 但只有一个可用配置，会自动使用它；如果有多个配置，会拒绝自动选择并提示用命令指定名称。
+当前推荐的 anchor 类型是 `home`、`fishing_spot`、`harvest_spot`、`chest`、`guard_post`、`redstone_watch`；region 类型是 `farm`、`pond`、`redstone`。名称只能使用小写字母、数字、下划线或连字符。右键菜单和自然语言 intent 会优先使用 `default`；如果没有 `default` 但只有一个可用配置，会自动使用它；如果有多个配置，会拒绝自动选择并提示用命令指定名称。
 
 Job 状态和钓鱼控制：
 
@@ -346,7 +354,7 @@ Job 状态和钓鱼控制：
 /craftmaid harvest stop
 ```
 
-`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
+`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物；如果存在 `anchor harvest_spot/wheat_field`，女仆会优先走到该站位，否则自动在农田外侧找安全站位。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
 
 跟随的 3-8 格默认停留区间不会追逐、不会判定卡住、不会传送；超过 `start_distance` 才重新寻路，超过 `teleport_distance` 才允许带冷却传送。`destination_teleport_margin` 保留为配置项，但 CraftMaid 会在代码里强制禁用 Citizens 内部目的地传送，避免 NPC 在玩家移动路径上碎片式闪现。
 

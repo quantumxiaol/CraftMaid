@@ -473,7 +473,7 @@ public class ChatListener implements Listener {
         10. 如果玩家说“保护我”“护卫我”“帮我战斗”“去战斗”“打怪”，输出 GUARD_START；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_START。
         11. 如果玩家说“守在这里”“守住这里”“在这里警戒”，输出 GUARD_HERE；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_HERE。
         12. 如果玩家说“停止护卫”“别打了”“停止战斗”“不用保护我了”，输出 GUARD_STOP。
-        13. “回来钓鱼”“回来收田”“过来看看”“陪我”“你在哪里”这类不明确移动命令时，优先按上下文聊天或对应工作处理，不要输出 RECALL/FOLLOW_START。
+        13. 如果“回来/过去/去/来/跟我”后面连接的是工作、地点、观察或闲聊意图，而不是明确要求移动到玩家身边或开始持续跟随，不要输出 RECALL/FOLLOW_START。
         14. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
         15. 如果玩家询问当前位置、周围有什么、建筑/房间/农田/水域/红石机器是什么，且当前环境里没有方块统计，输出 INSPECT_SURROUNDINGS，chat=""。
         16. INSPECT_SURROUNDINGS 是只读观察，不能和工作、跟随、护卫、召回等 action 混用。

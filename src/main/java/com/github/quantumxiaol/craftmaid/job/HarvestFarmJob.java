@@ -24,9 +24,6 @@ import org.bukkit.scheduler.BukkitTask;
 final class HarvestFarmJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 1;
   private static final int MAX_CHUNK_TICKETS = 64;
-  private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
-  private static final int MOVE_RETRY_TICKS = 20;
-  private static final double ARRIVAL_DISTANCE = 3.0;
   private static final Set<Material> CROPS =
       EnumSet.of(
           Material.WHEAT,
@@ -41,29 +38,36 @@ final class HarvestFarmJob implements MaidJob, Runnable {
   private final String name;
   private final AnchorRegion farm;
   private final Location farmCenter;
+  private final Location harvestSpot;
   private final JobChunkTickets chunkTickets;
 
   private BukkitTask task;
+  private JobTravelController travelController;
   private JobPhase phase = JobPhase.STARTING;
   private boolean stopped;
   private boolean finishedScanning;
   private int cursorX;
   private int cursorY;
   private int cursorZ;
-  private int travelTicks;
   private int scannedBlocks;
   private int harvestedBlocks;
   private int itemCount;
   private String lastCrop = "none";
 
   HarvestFarmJob(
-      CraftMaid plugin, MaidJobService jobService, UUID ownerId, String name, AnchorRegion farm) {
+      CraftMaid plugin,
+      MaidJobService jobService,
+      UUID ownerId,
+      String name,
+      AnchorRegion farm,
+      Location harvestSpot) {
     this.plugin = plugin;
     this.jobService = jobService;
     this.ownerId = ownerId;
     this.name = name;
     this.farm = farm;
     this.farmCenter = centerOf(farm);
+    this.harvestSpot = harvestSpot == null ? null : harvestSpot.clone();
     this.chunkTickets = new JobChunkTickets(plugin);
     this.cursorX = farm.minX();
     this.cursorY = farm.minY();
@@ -116,7 +120,16 @@ final class HarvestFarmJob implements MaidJob, Runnable {
               + "。");
     }
     chunkTickets.addRegion(farm);
-    if (!plugin.getMaidNpcService().moveTo(farmCenter)) {
+    Location standPoint = resolveStandPoint(world);
+    if (standPoint == null) {
+      phase = JobPhase.FAILED;
+      chunkTickets.release();
+      return JobActionResult.failure(
+          "找不到 farm/" + name + " 附近的安全站位，请设置 anchor harvest_spot/" + name + "。");
+    }
+    chunkTickets.addLocation(standPoint);
+    travelController = new JobTravelController(plugin, standPoint);
+    if (!plugin.getMaidNpcService().moveTo(standPoint)) {
       phase = JobPhase.FAILED;
       chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 farm/" + name + "。");
@@ -145,12 +158,8 @@ final class HarvestFarmJob implements MaidJob, Runnable {
       return;
     }
 
-    if (!plugin.getMaidNpcService().isNear(farmCenter, ARRIVAL_DISTANCE)) {
-      travelTicks += PERIOD_TICKS;
-      if (travelTicks % MOVE_RETRY_TICKS == 0) {
-        plugin.getMaidNpcService().moveTo(farmCenter);
-      }
-      if (travelTicks >= ARRIVAL_TIMEOUT_TICKS) {
+    if (!travelController.hasArrived()) {
+      if (!travelController.tickTravelling(PERIOD_TICKS)) {
         fail("收割任务停止：女仆一直没有到达 farm/" + name + "。");
       }
       return;
@@ -158,6 +167,8 @@ final class HarvestFarmJob implements MaidJob, Runnable {
 
     if (phase == JobPhase.TRAVELLING || phase == JobPhase.STARTING) {
       phase = JobPhase.RUNNING;
+      travelController.reset();
+      plugin.getMaidNpcService().lookAt(farmCenter);
       plugin.getJobEventBuffer().add("到达 farm/" + name + "，开始扫描成熟作物。");
     }
 
@@ -357,5 +368,20 @@ final class HarvestFarmJob implements MaidJob, Runnable {
         (region.minX() + region.maxX() + 1) / 2.0,
         (region.minY() + region.maxY() + 1) / 2.0,
         (region.minZ() + region.maxZ() + 1) / 2.0);
+  }
+
+  private Location resolveStandPoint(World world) {
+    if (harvestSpot != null) {
+      if (harvestSpot.getWorld() == null || !harvestSpot.getWorld().equals(world)) {
+        return null;
+      }
+      return JobNavigationTargets.findSafeVerticalLocation(harvestSpot);
+    }
+
+    Location outside = JobNavigationTargets.findSafeStandPointAroundRegion(world, farm);
+    if (outside != null) {
+      return outside;
+    }
+    return JobNavigationTargets.findSafeVerticalLocation(farmCenter);
   }
 }

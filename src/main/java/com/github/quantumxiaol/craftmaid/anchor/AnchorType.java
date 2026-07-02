@@ -7,6 +7,7 @@ import java.util.Optional;
 public enum AnchorType {
   HOME("home", "home"),
   FISHING_SPOT("fishing_spot", "fishing_spot"),
+  HARVEST_SPOT("harvest_spot", "harvest_spot"),
   CHEST("chest", "chest"),
   GUARD_POST("guard_post", "guard_post"),
   REDSTONE_WATCH("redstone_watch", "redstone_watch");
@@ -35,6 +36,8 @@ public enum AnchorType {
     String normalized = input.trim().toLowerCase(Locale.ROOT);
     if (normalized.equals("fishing") || normalized.equals("pond")) {
       normalized = FISHING_SPOT.key;
+    } else if (normalized.equals("harvest") || normalized.equals("farm_spot")) {
+      normalized = HARVEST_SPOT.key;
     } else if (normalized.equals("redstone") || normalized.equals("redstone_post")) {
       normalized = REDSTONE_WATCH.key;
     } else if (normalized.equals("guard")) {

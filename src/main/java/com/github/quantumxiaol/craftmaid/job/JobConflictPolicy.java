@@ -3,16 +3,19 @@ package com.github.quantumxiaol.craftmaid.job;
 import com.github.quantumxiaol.craftmaid.CraftMaid;
 
 enum JobConflictPolicy {
-  FISHING(true, true),
-  CHUNK_KEEPER(false, true),
-  HARVEST(true, true);
+  FISHING(true, true, true),
+  CHUNK_KEEPER(false, true, false),
+  HARVEST(true, true, true);
 
   private final boolean blocksGuarding;
   private final boolean stopsFollowing;
+  private final boolean requiresExclusiveBodyControl;
 
-  JobConflictPolicy(boolean blocksGuarding, boolean stopsFollowing) {
+  JobConflictPolicy(
+      boolean blocksGuarding, boolean stopsFollowing, boolean requiresExclusiveBodyControl) {
     this.blocksGuarding = blocksGuarding;
     this.stopsFollowing = stopsFollowing;
+    this.requiresExclusiveBodyControl = requiresExclusiveBodyControl;
   }
 
   static JobConflictPolicy forType(MaidJobType type) {
@@ -40,5 +43,9 @@ enum JobConflictPolicy {
     if (stopsFollowing) {
       plugin.getMaidNpcService().stopFollowing();
     }
+  }
+
+  boolean requiresExclusiveBodyControl() {
+    return requiresExclusiveBodyControl;
   }
 }
