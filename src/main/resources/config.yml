@@ -15,13 +15,20 @@ maid:
   follow:
     # Citizens Navigator 默认速度是 1.0；生存疾跑跟随建议 1.7-2.0，过高可能路径抖动。
     speed: 1.75
-    update_ticks: 5
+    update_ticks: 10
     stop_distance: 3.0
-    start_distance: 6.0
-    teleport_distance: 32.0
-    teleport_on_stuck_seconds: 5
+    start_distance: 8.0
+    # 传送只是跨世界、极远距离或严重卡住时的兜底，不是普通跟随机制。
+    teleport_enabled: true
+    teleport_distance: 128.0
+    # 0 表示关闭卡住自动传送；卡住时只重算路径，避免 3-8 格待机区误判后闪现。
+    teleport_on_stuck_seconds: 0
+    teleport_cooldown_seconds: 30
+    stuck_retry_before_teleport: 3
+    stuck_teleport_min_distance: 24.0
     straight_line_distance: 12.0
-    destination_teleport_margin: 48.0
+    # -1 表示禁用 Citizens 内部目的地传送；CraftMaid 会在代码里强制禁用该内部传送。
+    destination_teleport_margin: -1.0
   combat:
     # 只主动攻击 hostile_targets 白名单里的目标；保护目标请放入 avoid_targets。
     hostile_targets:

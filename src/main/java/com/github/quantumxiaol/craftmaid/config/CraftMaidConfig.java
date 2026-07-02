@@ -93,21 +93,29 @@ public record CraftMaidConfig(
             getConfigString(plugin, "maid.skin", "master"),
             new FollowSettings(
                 clamp(plugin.getConfig().getDouble("maid.follow.speed", 1.75), 0.1, 3.0),
-                Math.max(1, plugin.getConfig().getInt("maid.follow.update_ticks", 5)),
+                Math.max(1, plugin.getConfig().getInt("maid.follow.update_ticks", 10)),
                 clamp(plugin.getConfig().getDouble("maid.follow.stop_distance", 3.0), 0.0, 32.0),
-                clamp(plugin.getConfig().getDouble("maid.follow.start_distance", 6.0), 0.0, 64.0),
+                clamp(plugin.getConfig().getDouble("maid.follow.start_distance", 8.0), 0.0, 64.0),
+                plugin.getConfig().getBoolean("maid.follow.teleport_enabled", true),
                 clamp(
-                    plugin.getConfig().getDouble("maid.follow.teleport_distance", 32.0),
+                    plugin.getConfig().getDouble("maid.follow.teleport_distance", 128.0),
                     4.0,
                     512.0),
-                Math.max(0, plugin.getConfig().getInt("maid.follow.teleport_on_stuck_seconds", 5)),
+                Math.max(0, plugin.getConfig().getInt("maid.follow.teleport_on_stuck_seconds", 0)),
+                Math.max(0, plugin.getConfig().getInt("maid.follow.teleport_cooldown_seconds", 30)),
+                Math.max(
+                    1, plugin.getConfig().getInt("maid.follow.stuck_retry_before_teleport", 3)),
+                clamp(
+                    plugin.getConfig().getDouble("maid.follow.stuck_teleport_min_distance", 24.0),
+                    1.0,
+                    512.0),
                 clamp(
                     plugin.getConfig().getDouble("maid.follow.straight_line_distance", 12.0),
                     0.0,
                     128.0),
                 clamp(
-                    plugin.getConfig().getDouble("maid.follow.destination_teleport_margin", 48.0),
-                    0.0,
+                    plugin.getConfig().getDouble("maid.follow.destination_teleport_margin", -1.0),
+                    -1.0,
                     512.0)),
             new CombatSettings(
                 plugin.getConfig().getBoolean("maid.combat.enemy_drops", true),
@@ -309,8 +317,12 @@ public record CraftMaidConfig(
       int updateTicks,
       double stopDistance,
       double startDistance,
+      boolean teleportEnabled,
       double teleportDistance,
       int teleportOnStuckSeconds,
+      int teleportCooldownSeconds,
+      int stuckRetryBeforeTeleport,
+      double stuckTeleportMinDistance,
       double straightLineDistance,
       double destinationTeleportMargin) {}
 

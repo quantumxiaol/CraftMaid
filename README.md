@@ -23,7 +23,7 @@ CraftMaid 分成两层能力。
 * **单 LLM JSON Turn Loop**：玩家对话、历史记忆、环境、当前 Job 状态、最近产出和背包摘要会一起进入 LLM；LLM 必须返回 `{chat, actions}` JSON。actions 非空时插件先执行白名单 action，再用执行结果生成最终回复。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
-* **跟随**：使用 Citizens Navigator；默认更快导航、近距离停留、远距离传送追赶，适配生存疾跑移动。
+* **跟随**：使用 Citizens Navigator；默认更快导航、近距离停留，传送只作为跨世界或极远距离兜底，普通跟随保持走路的身体感。
 * **Sentinel 护卫原型**：可通过菜单或自然语言让女仆保护主人、停止护卫或守在当前位置；默认使用明确敌对目标白名单，并把保护目标交给 Sentinel 回避/忽略。铁傀儡、猪灵、僵尸猪灵、末影人、北极熊默认只在护卫模式下攻击主人后才会被临时反击。
 * **虚拟生存能力**：护卫时可给女仆配置 Sentinel 虚拟血量/护甲/回血和隐藏药水效果，不需要穿可见盔甲遮挡皮肤。
 * **战斗掉落/经验处理**：护卫初始化时会打开 Sentinel 的敌怪掉落；默认开启 NPC 击杀经验补偿，但它依赖插件识别最后一击来源，不等同于原版玩家击杀。
@@ -36,7 +36,7 @@ CraftMaid 分成两层能力。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
 * **完整自然语言动作执行**：当前只开放钓鱼、收田、看机器、召回、跟随、护卫、守点、停止工作和状态查询这些有限 action；还没有开放任意工具调用或复杂任务队列。
-* **跟随细节**：当前还没有重载后继续跟随或复杂跨世界策略；远距离/卡住会尝试传送到主人附近安全位置。
+* **跟随细节**：当前还没有重载后继续跟随或复杂跨世界策略；跨世界或极远距离会尝试传送到主人附近安全位置，卡住默认只重算路径。
 
 ## 📦 前置要求
 
@@ -138,13 +138,17 @@ maid:
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
   follow:
     speed: 1.75 # Citizens Navigator 默认速度是 1.0；生存疾跑建议 1.7-2.0
-    update_ticks: 5
+    update_ticks: 10
     stop_distance: 3.0
-    start_distance: 6.0
-    teleport_distance: 32.0
-    teleport_on_stuck_seconds: 5
+    start_distance: 8.0
+    teleport_enabled: true
+    teleport_distance: 128.0
+    teleport_on_stuck_seconds: 0 # 0 表示卡住时只重算路径，不自动传送
+    teleport_cooldown_seconds: 30
+    stuck_retry_before_teleport: 3
+    stuck_teleport_min_distance: 24.0
     straight_line_distance: 12.0
-    destination_teleport_margin: 48.0
+    destination_teleport_margin: -1.0 # CraftMaid 会强制禁用 Citizens 内部目的地传送
   combat:
     # 只主动攻击 hostile_targets；保护目标请放入 avoid_targets
     hostile_targets: [zombies, skeletons, drowned, spiders, witches, pillagers]
@@ -343,6 +347,8 @@ Job 状态和钓鱼控制：
 ```
 
 `/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
+
+跟随的 3-8 格默认停留区间不会追逐、不会判定卡住、不会传送；超过 `start_distance` 才重新寻路，超过 `teleport_distance` 才允许带冷却传送。`destination_teleport_margin` 保留为配置项，但 CraftMaid 会在代码里强制禁用 Citizens 内部目的地传送，避免 NPC 在玩家移动路径上碎片式闪现。
 
 自然语言 action 只在玩家喊了女仆名字，或处于 `chat.followup_seconds` 对话窗口内时检测。默认 `intent.llm_json: true` 时，普通聊天和工作控制都走同一个 JSON 协议：
 

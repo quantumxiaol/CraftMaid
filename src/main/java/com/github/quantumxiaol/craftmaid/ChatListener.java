@@ -467,17 +467,18 @@ public class ChatListener implements Listener {
         4. 只允许使用列出的 action，不要编造 action，不要输出服务器命令。
         5. name 必须来自“可用工作配置”；如果玩家没有指定且只有一个可用配置，可以省略 name 让插件自动选择。
         6. 如果玩家说“别钓鱼了，快去收田”，输出 JOB_STOP + HARVEST_START。
-        7. 如果玩家说“到我这来”“回来”“过来”，输出 RECALL；如果你正在工作，输出 JOB_STOP + RECALL。
-        8. 如果玩家说“跟着我”“跟我来”“跟上”，输出 FOLLOW_START；如果你正在工作，输出 JOB_STOP + FOLLOW_START。
+        7. 只有玩家明确说“过来”“来我这里”“到我身边”“回到我身边”“召回”时，才输出 RECALL；如果你正在工作，输出 JOB_STOP + RECALL。
+        8. 只有玩家明确说“跟着我”“开始跟随”“跟上我”“跟我走”时，才输出 FOLLOW_START；如果你正在工作，输出 JOB_STOP + FOLLOW_START。
         9. 如果玩家说“别跟了”“停止跟随”“留在这里”，输出 FOLLOW_STOP。
         10. 如果玩家说“保护我”“护卫我”“帮我战斗”“去战斗”“打怪”，输出 GUARD_START；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_START。
         11. 如果玩家说“守在这里”“守住这里”“在这里警戒”，输出 GUARD_HERE；如果你正在钓鱼或收田，输出 JOB_STOP + GUARD_HERE。
         12. 如果玩家说“停止护卫”“别打了”“停止战斗”“不用保护我了”，输出 GUARD_STOP。
-        13. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
-        14. 如果玩家询问当前位置、周围有什么、建筑/房间/农田/水域/红石机器是什么，且当前环境里没有方块统计，输出 INSPECT_SURROUNDINGS，chat=""。
-        15. INSPECT_SURROUNDINGS 是只读观察，不能和工作、跟随、护卫、召回等 action 混用。
-        16. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
-        17. chat 最多 80 个中文字符，必须是完整句子。
+        13. “回来钓鱼”“回来收田”“过来看看”“陪我”“你在哪里”这类不明确移动命令时，优先按上下文聊天或对应工作处理，不要输出 RECALL/FOLLOW_START。
+        14. 如果不确定玩家是否在下命令，优先聊天，不执行 action。
+        15. 如果玩家询问当前位置、周围有什么、建筑/房间/农田/水域/红石机器是什么，且当前环境里没有方块统计，输出 INSPECT_SURROUNDINGS，chat=""。
+        16. INSPECT_SURROUNDINGS 是只读观察，不能和工作、跟随、护卫、召回等 action 混用。
+        17. 如果本轮模式是 FINAL，actions 必须是 []，只能根据服务器动作结果生成最终 chat。
+        18. chat 最多 80 个中文字符，必须是完整句子。
         """;
   }
 

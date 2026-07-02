@@ -46,6 +46,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private BukkitTask followTask;
   private Location followLastLocation;
   private int followStuckTicks;
+  private int followStuckRetries;
+  private long followNextTeleportAtMillis;
   private boolean guarding;
 
   public CitizensMaidNpcService(CraftMaid plugin) {
@@ -250,6 +252,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
     followLastLocation = null;
     followStuckTicks = 0;
+    followStuckRetries = 0;
+    followNextTeleportAtMillis = 0L;
 
     NPC npc = getStoredNpcOrNull();
     if (npc != null && npc.isSpawned()) {
@@ -710,7 +714,10 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     parameters.distanceMargin(settings.stopDistance());
     parameters.pathDistanceMargin(settings.stopDistance());
     parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
-    parameters.destinationTeleportMargin(settings.destinationTeleportMargin());
+    // Citizens' destination teleport is too eager for a companion NPC. CraftMaid handles the
+    // rare teleport fallback explicitly, with distance gates and cooldowns.
+    parameters.destinationTeleportMargin(-1.0);
+    parameters.avoidWater(true);
   }
 
   private void configureDirectedNavigation(NPC npc) {
@@ -721,7 +728,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     parameters.distanceMargin(1.5);
     parameters.pathDistanceMargin(1.5);
     parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
-    parameters.destinationTeleportMargin(settings.destinationTeleportMargin());
+    parameters.destinationTeleportMargin(-1.0);
+    parameters.avoidWater(true);
   }
 
   private void resetNavigatorSpeed(NPC npc) {
@@ -740,7 +748,10 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npcLocation.getWorld() == null
         || playerLocation.getWorld() == null
         || !npcLocation.getWorld().equals(playerLocation.getWorld())) {
-      teleportNearPlayer(npc, player);
+      if (!maybeTeleportNearPlayer(npc, player, settings, true)) {
+        npc.getNavigator().cancelNavigation();
+        resetFollowStuck(npcLocation);
+      }
       return;
     }
 
@@ -752,53 +763,86 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (distanceSquared <= stopDistanceSquared) {
       npc.getNavigator().cancelNavigation();
       npc.faceLocation(player.getEyeLocation());
+      resetFollowStuck(npcLocation);
+      return;
+    }
+
+    if (distanceSquared < startDistanceSquared) {
+      npc.getNavigator().cancelNavigation();
+      npc.faceLocation(player.getEyeLocation());
+      resetFollowStuck(npcLocation);
+      return;
+    }
+
+    if (distanceSquared >= teleportDistanceSquared
+        && maybeTeleportNearPlayer(npc, player, settings, false)) {
+      return;
+    }
+
+    if (isFollowStuck(npcLocation, settings)) {
+      followStuckRetries++;
       followLastLocation = npcLocation;
       followStuckTicks = 0;
-      return;
-    }
-
-    if (distanceSquared >= teleportDistanceSquared || isFollowStuck(npcLocation, settings)) {
-      teleportNearPlayer(npc, player);
-      return;
-    }
-
-    if (distanceSquared >= startDistanceSquared) {
+      npc.getNavigator().cancelNavigation();
       npc.getNavigator().setTarget(player, false);
-    } else {
-      npc.faceLocation(player.getEyeLocation());
+      double stuckTeleportMinDistanceSquared =
+          settings.stuckTeleportMinDistance() * settings.stuckTeleportMinDistance();
+      if (followStuckRetries >= settings.stuckRetryBeforeTeleport()
+          && distanceSquared >= stuckTeleportMinDistanceSquared
+          && maybeTeleportNearPlayer(npc, player, settings, false)) {
+        return;
+      }
+      return;
     }
+
+    npc.getNavigator().setTarget(player, false);
   }
 
   private boolean isFollowStuck(Location npcLocation, CraftMaidConfig.FollowSettings settings) {
     if (settings.teleportOnStuckSeconds() <= 0) {
-      followLastLocation = npcLocation;
-      followStuckTicks = 0;
+      resetFollowStuck(npcLocation);
       return false;
     }
     if (followLastLocation == null
         || followLastLocation.getWorld() == null
         || !followLastLocation.getWorld().equals(npcLocation.getWorld())) {
-      followLastLocation = npcLocation;
-      followStuckTicks = 0;
+      resetFollowStuck(npcLocation);
       return false;
     }
 
     if (followLastLocation.distanceSquared(npcLocation) < 0.0625) {
       followStuckTicks += settings.updateTicks();
     } else {
-      followStuckTicks = 0;
-      followLastLocation = npcLocation;
+      resetFollowStuck(npcLocation);
     }
     return followStuckTicks >= settings.teleportOnStuckSeconds() * 20;
   }
 
-  private void teleportNearPlayer(NPC npc, Player player) {
+  private void resetFollowStuck(Location npcLocation) {
+    followLastLocation = npcLocation;
+    followStuckTicks = 0;
+    followStuckRetries = 0;
+  }
+
+  private boolean maybeTeleportNearPlayer(
+      NPC npc, Player player, CraftMaidConfig.FollowSettings settings, boolean ignoreCooldown) {
+    if (!settings.teleportEnabled()) {
+      return false;
+    }
+    long now = System.currentTimeMillis();
+    if (!ignoreCooldown && now < followNextTeleportAtMillis) {
+      return false;
+    }
     Location target = findSafeFollowLocation(player);
+    if (target == null) {
+      return false;
+    }
     npc.getNavigator().cancelNavigation();
     npc.teleport(target, PlayerTeleportEvent.TeleportCause.PLUGIN);
     npc.faceLocation(player.getEyeLocation());
-    followLastLocation = target;
-    followStuckTicks = 0;
+    resetFollowStuck(target);
+    followNextTeleportAtMillis = now + settings.teleportCooldownSeconds() * 1000L;
+    return true;
   }
 
   private Location findSafeFollowLocation(Player player) {
@@ -830,7 +874,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
         return safe;
       }
     }
-    return playerLocation;
+    return null;
   }
 
   private Location findSafeVerticalLocation(Location candidate) {
@@ -858,7 +902,13 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private boolean isSafeStandingLocation(Location location) {
-    return location.getBlock().isPassable()
+    Material feet = location.getBlock().getType();
+    Material head = location.clone().add(0, 1, 0).getBlock().getType();
+    return feet != Material.WATER
+        && feet != Material.LAVA
+        && head != Material.WATER
+        && head != Material.LAVA
+        && location.getBlock().isPassable()
         && location.clone().add(0, 1, 0).getBlock().isPassable()
         && location.clone().add(0, -1, 0).getBlock().getType().isSolid();
   }
