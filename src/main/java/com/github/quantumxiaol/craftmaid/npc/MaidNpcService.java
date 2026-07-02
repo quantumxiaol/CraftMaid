@@ -43,6 +43,8 @@ public interface MaidNpcService {
 
   boolean isFollowing();
 
+  boolean stopMoving();
+
   boolean moveTo(Location location);
 
   boolean isNear(Location location, double distance);

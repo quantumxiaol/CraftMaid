@@ -90,6 +90,11 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean stopMoving() {
+    return false;
+  }
+
+  @Override
   public boolean moveTo(Location location) {
     return false;
   }

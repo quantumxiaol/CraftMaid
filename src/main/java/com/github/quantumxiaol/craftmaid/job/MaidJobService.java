@@ -99,6 +99,7 @@ public final class MaidJobService {
       return JobActionResult.failure(policy.blockedMessage(job.type()));
     }
     policy.applyBeforeStart(plugin);
+    plugin.getMaidNpcService().stopMoving();
 
     JobActionResult startResult = job.start();
     if (!startResult.success()) {

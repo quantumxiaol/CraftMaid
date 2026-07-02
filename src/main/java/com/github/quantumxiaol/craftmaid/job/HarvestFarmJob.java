@@ -24,6 +24,7 @@ import org.bukkit.scheduler.BukkitTask;
 final class HarvestFarmJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 1;
   private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
+  private static final int MOVE_RETRY_TICKS = 20;
   private static final double ARRIVAL_DISTANCE = 3.0;
   private static final Set<Material> CROPS =
       EnumSet.of(
@@ -119,7 +120,9 @@ final class HarvestFarmJob implements MaidJob, Runnable {
 
     if (!plugin.getMaidNpcService().isNear(farmCenter, ARRIVAL_DISTANCE)) {
       travelTicks += PERIOD_TICKS;
-      plugin.getMaidNpcService().moveTo(farmCenter);
+      if (travelTicks % MOVE_RETRY_TICKS == 0) {
+        plugin.getMaidNpcService().moveTo(farmCenter);
+      }
       if (travelTicks >= ARRIVAL_TIMEOUT_TICKS) {
         fail("收割任务停止：女仆一直没有到达 farm/" + name + "。");
       }
@@ -290,6 +293,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
       task.cancel();
       task = null;
     }
+    plugin.getMaidNpcService().stopMoving();
     plugin
         .getLogger()
         .info(

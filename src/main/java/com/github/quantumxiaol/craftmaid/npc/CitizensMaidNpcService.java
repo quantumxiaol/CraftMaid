@@ -265,14 +265,35 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean stopMoving() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null || !npc.isSpawned()) {
+      return false;
+    }
+
+    npc.getNavigator().cancelNavigation();
+    resetNavigatorSpeed(npc);
+    return true;
+  }
+
+  @Override
   public boolean moveTo(Location location) {
     if (location == null || location.getWorld() == null) {
       return false;
     }
+    if (followTask != null) {
+      stopFollowing();
+    }
+
     NPC npc = ensureSpawnedAt(location);
     if (npc == null) {
       return false;
     }
+    configureDirectedNavigation(npc);
+    if (shouldTeleportForDirectedMove(npc, location)) {
+      teleportNearLocation(npc, location);
+    }
+    npc.getNavigator().cancelNavigation();
     npc.getNavigator().setTarget(location);
     return true;
   }
@@ -632,6 +653,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       cleanupSentinelCombat(trait);
       guarding = false;
       plugin.getMaidCombatBuffService().stop();
+      stopMoving();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("停止 Sentinel 护卫失败: " + rootMessage(ex));
@@ -688,8 +710,72 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     parameters.destinationTeleportMargin(settings.destinationTeleportMargin());
   }
 
+  private void configureDirectedNavigation(NPC npc) {
+    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
+    var parameters = npc.getNavigator().getLocalParameters();
+    parameters.speed((float) settings.speed());
+    parameters.updatePathRate(Math.max(5, settings.updateTicks()));
+    parameters.distanceMargin(1.5);
+    parameters.pathDistanceMargin(1.5);
+    parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
+    parameters.destinationTeleportMargin(settings.destinationTeleportMargin());
+  }
+
   private void resetNavigatorSpeed(NPC npc) {
     npc.getNavigator().getLocalParameters().speed(DEFAULT_NAVIGATOR_SPEED);
+  }
+
+  private boolean shouldTeleportForDirectedMove(NPC npc, Location target) {
+    if (npc.getEntity() == null || target.getWorld() == null) {
+      return false;
+    }
+    Location npcLocation = npc.getEntity().getLocation();
+    if (npcLocation.getWorld() == null || !npcLocation.getWorld().equals(target.getWorld())) {
+      return true;
+    }
+    if (!isSafeStandingLocation(npcLocation)) {
+      return true;
+    }
+
+    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
+    double teleportDistance = Math.max(16.0, settings.teleportDistance());
+    return npcLocation.distanceSquared(target) >= teleportDistance * teleportDistance
+        || Math.abs(npcLocation.getY() - target.getY()) >= 16.0;
+  }
+
+  private void teleportNearLocation(NPC npc, Location target) {
+    Location safeTarget = findSafeTargetLocation(target);
+    npc.getNavigator().cancelNavigation();
+    npc.teleport(safeTarget, PlayerTeleportEvent.TeleportCause.PLUGIN);
+    followLastLocation = safeTarget;
+    followStuckTicks = 0;
+  }
+
+  private Location findSafeTargetLocation(Location target) {
+    Location base = target.clone();
+    base.setPitch(0.0F);
+    double[][] offsets = {
+      {0.0, 0.0},
+      {1.0, 0.0},
+      {-1.0, 0.0},
+      {0.0, 1.0},
+      {0.0, -1.0},
+      {2.0, 0.0},
+      {-2.0, 0.0},
+      {0.0, 2.0},
+      {0.0, -2.0}
+    };
+
+    for (double[] offset : offsets) {
+      Location candidate = base.clone().add(offset[0], 0.0, offset[1]);
+      Location safe = findSafeVerticalLocation(candidate);
+      if (safe != null) {
+        safe.setYaw(base.getYaw());
+        safe.setPitch(0.0F);
+        return safe;
+      }
+    }
+    return centerOnBlock(base);
   }
 
   private void updateFollowTarget(NPC npc, Player player) {

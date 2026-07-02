@@ -22,6 +22,7 @@ final class FishingJob implements MaidJob, Runnable {
   private static final int PERIOD_TICKS = 20;
   private static final int MAX_POND_VOLUME = 8192;
   private static final int ARRIVAL_TIMEOUT_TICKS = 20 * 60;
+  private static final int MOVE_RETRY_TICKS = 60;
   private static final double ARRIVAL_DISTANCE = 2.5;
 
   private final CraftMaid plugin;
@@ -117,7 +118,9 @@ final class FishingJob implements MaidJob, Runnable {
 
     if (!plugin.getMaidNpcService().isNear(fishingSpot, ARRIVAL_DISTANCE)) {
       travelTicks += PERIOD_TICKS;
-      plugin.getMaidNpcService().moveTo(fishingSpot);
+      if (travelTicks % MOVE_RETRY_TICKS == 0) {
+        plugin.getMaidNpcService().moveTo(fishingSpot);
+      }
       if (travelTicks >= ARRIVAL_TIMEOUT_TICKS) {
         fail("钓鱼任务停止：女仆一直没有到达 fishing_spot/" + name + "。");
       }
@@ -201,6 +204,7 @@ final class FishingJob implements MaidJob, Runnable {
       plugin.getMaidNpcService().stopFishingAnimation();
       animationStarted = false;
     }
+    plugin.getMaidNpcService().stopMoving();
     plugin
         .getLogger()
         .info(
