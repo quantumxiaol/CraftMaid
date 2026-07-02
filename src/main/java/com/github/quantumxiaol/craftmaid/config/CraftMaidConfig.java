@@ -1,5 +1,6 @@
 package com.github.quantumxiaol.craftmaid.config;
 
+import java.util.List;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public record CraftMaidConfig(
@@ -12,6 +13,59 @@ public record CraftMaidConfig(
     String systemPrompt) {
   private static final String DEFAULT_SYSTEM_PROMPT =
       "你是 Minecraft 里的一名可爱女仆，请始终用简短、乖巧的语气用{language}回复。你的主人是{master}，你的名字是{name}。不要打破第四面墙，表现出你真实地生活在 Minecraft 的世界中。";
+  private static final List<String> DEFAULT_HOSTILE_TARGETS =
+      List.of(
+          "zombies",
+          "skeletons",
+          "strays",
+          "husks",
+          "drowned",
+          "zombie_villagers",
+          "spiders",
+          "cave_spiders",
+          "witches",
+          "slimes",
+          "magma_cubes",
+          "blazes",
+          "ghasts",
+          "guardians",
+          "elder_guardians",
+          "silverfish",
+          "endermites",
+          "phantoms",
+          "pillagers",
+          "vindicators",
+          "evokers",
+          "ravagers",
+          "vexes",
+          "wither_skeletons",
+          "withers",
+          "hoglins",
+          "zoglins",
+          "bogged",
+          "breeze",
+          "creaking");
+  private static final List<String> DEFAULT_FIGHTBACK_TARGETS =
+      List.of("iron_golems", "piglins", "zombified_piglins", "endermen", "polar_bears");
+  private static final List<String> DEFAULT_AVOID_TARGETS =
+      List.of(
+          "creepers",
+          "bees",
+          "wolves",
+          "cats",
+          "villagers",
+          "wandering_traders",
+          "snow_golems",
+          "dolphins",
+          "turtles",
+          "foxes",
+          "pandas",
+          "llamas",
+          "trader_llamas",
+          "horses",
+          "donkeys",
+          "mules",
+          "camels");
 
   public static CraftMaidConfig load(JavaPlugin plugin) {
     plugin.reloadConfig();
@@ -36,10 +90,88 @@ public record CraftMaidConfig(
             getConfigString(plugin, "maid.master", "PlayerName"),
             getConfigString(plugin, "maid.language", "中文"),
             getConfigString(plugin, "maid.skin", "master"),
-            plugin.getConfig().getBoolean("maid.combat.enemy_drops", true),
-            plugin.getConfig().getBoolean("maid.combat.enemy_exp", true),
-            Math.max(0, plugin.getConfig().getInt("maid.combat.default_enemy_exp", 5)),
-            clamp(plugin.getConfig().getDouble("maid.follow.speed", 1.35), 0.1, 3.0));
+            new FollowSettings(
+                clamp(plugin.getConfig().getDouble("maid.follow.speed", 1.75), 0.1, 3.0),
+                Math.max(1, plugin.getConfig().getInt("maid.follow.update_ticks", 5)),
+                clamp(plugin.getConfig().getDouble("maid.follow.stop_distance", 3.0), 0.0, 32.0),
+                clamp(plugin.getConfig().getDouble("maid.follow.start_distance", 6.0), 0.0, 64.0),
+                clamp(
+                    plugin.getConfig().getDouble("maid.follow.teleport_distance", 32.0),
+                    4.0,
+                    512.0),
+                Math.max(0, plugin.getConfig().getInt("maid.follow.teleport_on_stuck_seconds", 5)),
+                clamp(
+                    plugin.getConfig().getDouble("maid.follow.straight_line_distance", 12.0),
+                    0.0,
+                    128.0),
+                clamp(
+                    plugin.getConfig().getDouble("maid.follow.destination_teleport_margin", 48.0),
+                    0.0,
+                    512.0)),
+            new CombatSettings(
+                plugin.getConfig().getBoolean("maid.combat.enemy_drops", true),
+                plugin.getConfig().getBoolean("maid.combat.enemy_exp", true),
+                Math.max(0, plugin.getConfig().getInt("maid.combat.default_enemy_exp", 5)),
+                getConfigStringList(plugin, "maid.combat.hostile_targets", DEFAULT_HOSTILE_TARGETS),
+                getConfigStringList(
+                    plugin, "maid.combat.fightback_targets", DEFAULT_FIGHTBACK_TARGETS),
+                getConfigStringList(plugin, "maid.combat.avoid_targets", DEFAULT_AVOID_TARGETS),
+                new SurvivabilitySettings(
+                    plugin.getConfig().getBoolean("maid.combat.survivability.enabled", true),
+                    clamp(
+                        plugin
+                            .getConfig()
+                            .getDouble("maid.combat.survivability.sentinel_health", 40.0),
+                        1.0,
+                        1000.0),
+                    clamp(
+                        plugin
+                            .getConfig()
+                            .getDouble("maid.combat.survivability.sentinel_armor", 0.45),
+                        0.0,
+                        1.0),
+                    clamp(
+                        plugin
+                            .getConfig()
+                            .getDouble("maid.combat.survivability.sentinel_healrate_seconds", 2.0),
+                        0.0,
+                        120.0),
+                    Math.max(
+                        0,
+                        plugin
+                            .getConfig()
+                            .getInt("maid.combat.survivability.sentinel_respawn_seconds", 10)),
+                    plugin
+                        .getConfig()
+                        .getBoolean("maid.combat.survivability.sentinel_invincible", false),
+                    plugin
+                        .getConfig()
+                        .getBoolean("maid.combat.survivability.sentinel_protected", true),
+                    plugin
+                        .getConfig()
+                        .getBoolean("maid.combat.survivability.sentinel_fightback", true),
+                    plugin.getConfig().getBoolean("maid.combat.survivability.potion_buffs", true),
+                    Math.max(
+                        0,
+                        plugin
+                            .getConfig()
+                            .getInt("maid.combat.survivability.regeneration_amplifier", 0)),
+                    Math.max(
+                        0,
+                        plugin
+                            .getConfig()
+                            .getInt("maid.combat.survivability.resistance_amplifier", 0)),
+                    clamp(
+                        plugin
+                            .getConfig()
+                            .getDouble("maid.combat.survivability.absorption_hearts", 4.0),
+                        0.0,
+                        40.0),
+                    Math.max(
+                        20,
+                        plugin
+                            .getConfig()
+                            .getInt("maid.combat.survivability.refresh_ticks", 100)))));
 
     ChatSettings chat =
         new ChatSettings(
@@ -105,6 +237,15 @@ public record CraftMaidConfig(
     return value.trim();
   }
 
+  private static List<String> getConfigStringList(
+      JavaPlugin plugin, String path, List<String> defaultValue) {
+    List<String> values = plugin.getConfig().getStringList(path);
+    if (values == null || values.isEmpty()) {
+      return defaultValue;
+    }
+    return values.stream().filter(value -> value != null && !value.isBlank()).toList();
+  }
+
   private static String renderSystemPrompt(String rawSystemPrompt, MaidSettings maid) {
     String prompt =
         rawSystemPrompt == null || rawSystemPrompt.isBlank()
@@ -133,10 +274,42 @@ public record CraftMaidConfig(
       String master,
       String language,
       String skin,
+      FollowSettings follow,
+      CombatSettings combat) {}
+
+  public record FollowSettings(
+      double speed,
+      int updateTicks,
+      double stopDistance,
+      double startDistance,
+      double teleportDistance,
+      int teleportOnStuckSeconds,
+      double straightLineDistance,
+      double destinationTeleportMargin) {}
+
+  public record CombatSettings(
       boolean enemyDrops,
       boolean enemyExp,
       int defaultEnemyExp,
-      double followSpeed) {}
+      List<String> hostileTargets,
+      List<String> fightbackTargets,
+      List<String> avoidTargets,
+      SurvivabilitySettings survivability) {}
+
+  public record SurvivabilitySettings(
+      boolean enabled,
+      double sentinelHealth,
+      double sentinelArmor,
+      double sentinelHealrateSeconds,
+      int sentinelRespawnSeconds,
+      boolean sentinelInvincible,
+      boolean sentinelProtected,
+      boolean sentinelFightback,
+      boolean potionBuffs,
+      int regenerationAmplifier,
+      int resistanceAmplifier,
+      double absorptionHearts,
+      int refreshTicks) {}
 
   public record ChatSettings(
       int cooldownSeconds, int followupSeconds, int maxContextEntities, String replyPrefix) {}

@@ -23,8 +23,9 @@ CraftMaid 分成两层能力。
 * **单 LLM JSON Turn Loop**：玩家对话、历史记忆、环境、当前 Job 状态、最近产出和背包摘要会一起进入 LLM；LLM 必须返回 `{chat, actions}` JSON。actions 非空时插件先执行白名单 action，再用执行结果生成最终回复。
 * **皮肤配置**：`maid.skin` 支持 `master`、`player`、`none` / `default` 或任意玩家名；底层会尝试调用 Citizens `SkinTrait`。
 * **背包和装备**：背包使用 Citizens `Inventory` trait；装备使用 Citizens `Equipment` trait，可配置主手、副手和护甲。
-* **跟随**：使用 Citizens Navigator，每 20 tick 更新一次跟随目标；跟随速度可通过 `maid.follow.speed` 调整，默认 `1.35`。
-* **Sentinel 护卫原型**：可通过菜单让女仆保护主人、停止护卫或守在当前位置；底层通过反射接 Sentinel trait，目标为怪物并避开 creeper。
+* **跟随**：使用 Citizens Navigator；默认更快导航、近距离停留、远距离传送追赶，适配生存疾跑移动。
+* **Sentinel 护卫原型**：可通过菜单或自然语言让女仆保护主人、停止护卫或守在当前位置；默认使用明确敌对目标白名单，并把保护目标交给 Sentinel 回避/忽略。铁傀儡、猪灵、僵尸猪灵、末影人、北极熊默认只在护卫模式下攻击主人后才会被临时反击。
+* **虚拟生存能力**：护卫时可给女仆配置 Sentinel 虚拟血量/护甲/回血和隐藏药水效果，不需要穿可见盔甲遮挡皮肤。
 * **战斗掉落/经验处理**：护卫初始化时会打开 Sentinel 的敌怪掉落；默认开启 NPC 击杀经验补偿，但它依赖插件识别最后一击来源，不等同于原版玩家击杀。
 
 ## 尚未实现
@@ -35,7 +36,7 @@ CraftMaid 分成两层能力。
 * **家务系统**：还没有箱子整理、自动补种消耗种子、鱼塘自动发现、红石机器巡检逻辑或重载后恢复工作。
 * **完整 Job 调度**：当前只有单任务骨架，还没有任务队列、优先级、重载后恢复或复杂中断策略。
 * **完整自然语言动作执行**：当前只开放钓鱼、收田、看机器、召回、跟随、护卫、守点、停止工作和状态查询这些有限 action；还没有开放任意工具调用或复杂任务队列。
-* **跟随细节**：当前是第一版，还没有 `follow_distance`、`start_distance`、`teleport_distance`、跨世界处理、卡住恢复或重载后继续跟随。
+* **跟随细节**：当前还没有重载后继续跟随或复杂跨世界策略；远距离/卡住会尝试传送到主人附近安全位置。
 
 ## 📦 前置要求
 
@@ -136,11 +137,36 @@ maid:
   language: "中文"
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
   follow:
-    speed: 1.35 # Citizens Navigator 默认速度是 1.0；这里只影响跟随赶路
+    speed: 1.75 # Citizens Navigator 默认速度是 1.0；生存疾跑建议 1.7-2.0
+    update_ticks: 5
+    stop_distance: 3.0
+    start_distance: 6.0
+    teleport_distance: 32.0
+    teleport_on_stuck_seconds: 5
+    straight_line_distance: 12.0
+    destination_teleport_margin: 48.0
   combat:
+    # 只主动攻击 hostile_targets；保护目标请放入 avoid_targets
+    hostile_targets: [zombies, skeletons, drowned, spiders, witches, pillagers]
+    fightback_targets: [iron_golems, piglins, zombified_piglins, endermen, polar_bears]
+    avoid_targets: [creepers, bees, wolves, villagers, wandering_traders, cats]
     enemy_drops: true # Sentinel 护卫击杀敌怪时允许掉落物
     enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时尝试补基础经验
     default_enemy_exp: 5
+    survivability:
+      enabled: true
+      sentinel_health: 40.0
+      sentinel_armor: 0.45
+      sentinel_healrate_seconds: 2.0
+      sentinel_respawn_seconds: 10
+      sentinel_invincible: false
+      sentinel_protected: true
+      sentinel_fightback: true
+      potion_buffs: true
+      regeneration_amplifier: 0
+      resistance_amplifier: 0
+      absorption_hearts: 4.0 # Bukkit absorption amount，约等于 2 颗黄心
+      refresh_ticks: 100
   system_prompt: |-
     这里可以自定义女仆的人设、称呼习惯、说话风格和行为边界。
     可用占位符：{name}、{master}、{language}。占位符是可选的，完全重写后不包含占位符也可以。
@@ -212,7 +238,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.speed`、`maid.combat`、`conversation.summary.max_tokens`、`conversation.summary.temperature` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`conversation.summary.*` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -346,7 +372,9 @@ regions:
       pos2: ...
 ```
 
-护卫战斗里，`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
+护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。CraftMaid 不再额外取消女仆造成的伤害，目标控制交给 Sentinel 配置。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
+
+`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
 
 移除已记录的女仆 NPC：
 ```

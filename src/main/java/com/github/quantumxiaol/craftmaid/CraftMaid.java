@@ -1,6 +1,9 @@
 package com.github.quantumxiaol.craftmaid;
 
 import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
+import com.github.quantumxiaol.craftmaid.combat.MaidCombatBuffService;
+import com.github.quantumxiaol.craftmaid.combat.MaidCombatFightbackListener;
+import com.github.quantumxiaol.craftmaid.combat.MaidCombatPolicy;
 import com.github.quantumxiaol.craftmaid.combat.MaidLootListener;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
@@ -27,6 +30,8 @@ public final class CraftMaid extends JavaPlugin {
   private MaidJobService jobService;
   private MaidNpcService maidNpcService;
   private MaidMenuService maidMenuService;
+  private MaidCombatPolicy combatPolicy;
+  private MaidCombatBuffService combatBuffService;
 
   @Override
   public void onEnable() {
@@ -41,6 +46,7 @@ public final class CraftMaid extends JavaPlugin {
     jobService = new MaidJobService(this);
     maidNpcService = MaidNpcServices.create(this);
     maidMenuService = new MaidMenuService(this);
+    combatBuffService = new MaidCombatBuffService(this);
     if (!maidNpcService.isAvailable()) {
       getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
     }
@@ -50,6 +56,7 @@ public final class CraftMaid extends JavaPlugin {
     getServer().getPluginManager().registerEvents(chatListener, this);
     getServer().getPluginManager().registerEvents(maidMenuService, this);
     getServer().getPluginManager().registerEvents(new MaidLootListener(this), this);
+    getServer().getPluginManager().registerEvents(new MaidCombatFightbackListener(this), this);
     maidNpcService.registerInteractionListener(maidMenuService);
 
     PluginCommand craftMaidCommand = getCommand("craftmaid");
@@ -78,6 +85,9 @@ public final class CraftMaid extends JavaPlugin {
     if (maidNpcService != null) {
       maidNpcService.stopFollowing();
     }
+    if (combatBuffService != null) {
+      combatBuffService.stop();
+    }
     if (jobService != null) {
       jobService.shutdown();
     }
@@ -89,8 +99,12 @@ public final class CraftMaid extends JavaPlugin {
 
   public void loadConfiguration() {
     this.config = CraftMaidConfig.load(this);
+    this.combatPolicy = MaidCombatPolicy.from(config.maid().combat());
     if (anchorService != null) {
       anchorService.load();
+    }
+    if (combatBuffService != null) {
+      combatBuffService.restartIfGuarding();
     }
 
     CraftMaidConfig.LlmSettings llm = config.llm();
@@ -137,19 +151,39 @@ public final class CraftMaid extends JavaPlugin {
   }
 
   public boolean isMaidEnemyDropsEnabled() {
-    return config.maid().enemyDrops();
+    return config.maid().combat().enemyDrops();
   }
 
   public boolean isMaidEnemyExpEnabled() {
-    return config.maid().enemyExp();
+    return config.maid().combat().enemyExp();
   }
 
   public int getMaidDefaultEnemyExp() {
-    return config.maid().defaultEnemyExp();
+    return config.maid().combat().defaultEnemyExp();
   }
 
   public double getMaidFollowSpeed() {
-    return config.maid().followSpeed();
+    return config.maid().follow().speed();
+  }
+
+  public CraftMaidConfig.FollowSettings getMaidFollowSettings() {
+    return config.maid().follow();
+  }
+
+  public CraftMaidConfig.CombatSettings getMaidCombatSettings() {
+    return config.maid().combat();
+  }
+
+  public CraftMaidConfig.SurvivabilitySettings getMaidSurvivabilitySettings() {
+    return config.maid().combat().survivability();
+  }
+
+  public MaidCombatPolicy getMaidCombatPolicy() {
+    return combatPolicy;
+  }
+
+  public MaidCombatBuffService getMaidCombatBuffService() {
+    return combatBuffService;
   }
 
   public String getSystemPrompt() {

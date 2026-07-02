@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
@@ -15,6 +16,8 @@ public interface MaidNpcService {
   boolean isMaidNpc(int npcId);
 
   boolean isMaidEntity(Entity entity);
+
+  LivingEntity getMaidLivingEntity();
 
   void registerInteractionListener(MaidMenuService menuService);
 
@@ -75,6 +78,8 @@ public interface MaidNpcService {
   boolean startGuardingHere(Player player);
 
   boolean startGuardingAt(Location location);
+
+  boolean markGuardFightbackTarget(Entity entity);
 
   boolean stopGuarding();
 }

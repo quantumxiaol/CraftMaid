@@ -13,14 +13,95 @@ maid:
   # NPC 皮肤来源：master=使用 maid.master 的皮肤；player=使用触发操作的玩家皮肤；none/default=不主动设置；也可以直接填玩家名。
   skin: "master"
   follow:
-    # Citizens Navigator 默认速度是 1.0；跟随赶路时可以略微提高，太高容易出现路径抖动或追尾。
-    speed: 1.35
+    # Citizens Navigator 默认速度是 1.0；生存疾跑跟随建议 1.7-2.0，过高可能路径抖动。
+    speed: 1.75
+    update_ticks: 5
+    stop_distance: 3.0
+    start_distance: 6.0
+    teleport_distance: 32.0
+    teleport_on_stuck_seconds: 5
+    straight_line_distance: 12.0
+    destination_teleport_margin: 48.0
   combat:
+    # 只主动攻击 hostile_targets 白名单里的目标；保护目标请放入 avoid_targets。
+    hostile_targets:
+      - zombies
+      - skeletons
+      - strays
+      - husks
+      - drowned
+      - zombie_villagers
+      - spiders
+      - cave_spiders
+      - witches
+      - slimes
+      - magma_cubes
+      - blazes
+      - ghasts
+      - guardians
+      - elder_guardians
+      - silverfish
+      - endermites
+      - phantoms
+      - pillagers
+      - vindicators
+      - evokers
+      - ravagers
+      - vexes
+      - wither_skeletons
+      - withers
+      - hoglins
+      - zoglins
+      - bogged
+      - breeze
+      - creaking
+    # 中立或条件敌对目标：不主动攻击；护卫模式下它们攻击主人后，女仆才会短时反击。
+    fightback_targets:
+      - iron_golems
+      - piglins
+      - zombified_piglins
+      - endermen
+      - polar_bears
+    avoid_targets:
+      - creepers
+      - bees
+      - wolves
+      - cats
+      - villagers
+      - wandering_traders
+      - snow_golems
+      - dolphins
+      - turtles
+      - foxes
+      - pandas
+      - llamas
+      - trader_llamas
+      - horses
+      - donkeys
+      - mules
+      - camels
     # Sentinel 默认会阻止 NPC 击杀敌怪掉落物；这里开启后，护卫初始化时会允许敌怪正常掉落。
     enemy_drops: true
     # NPC 击杀不一定被服务端当成玩家击杀；死亡经验为 0 且插件能识别最后一击来源时，尝试补一个基础经验值。
     enemy_exp: true
     default_enemy_exp: 5
+    survivability:
+      enabled: true
+      # Sentinel 虚拟生存属性，不显示盔甲。
+      sentinel_health: 40.0
+      sentinel_armor: 0.45
+      sentinel_healrate_seconds: 2.0
+      sentinel_respawn_seconds: 10
+      sentinel_invincible: false
+      sentinel_protected: true
+      sentinel_fightback: true
+      # Bukkit 隐藏药水效果，只在护卫中周期刷新。
+      potion_buffs: true
+      regeneration_amplifier: 0
+      resistance_amplifier: 0
+      # Bukkit absorption amount，4.0 约等于 2 颗黄心。
+      absorption_hearts: 4.0
+      refresh_ticks: 100
   npc_id: -1
   system_prompt: |-
     你是 Minecraft 世界里的女仆 NPC「{name}」，请始终用{language}回复。

@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.List;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
@@ -23,6 +24,11 @@ final class NoopMaidNpcService implements MaidNpcService {
   @Override
   public boolean isMaidEntity(Entity entity) {
     return false;
+  }
+
+  @Override
+  public LivingEntity getMaidLivingEntity() {
+    return null;
   }
 
   @Override
@@ -168,6 +174,11 @@ final class NoopMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean startGuardingAt(Location location) {
+    return false;
+  }
+
+  @Override
+  public boolean markGuardFightbackTarget(Entity entity) {
     return false;
   }
 

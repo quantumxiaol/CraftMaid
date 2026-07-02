@@ -3,12 +3,17 @@ package com.github.quantumxiaol.craftmaid.npc;
 import com.github.quantumxiaol.craftmaid.CraftMaid;
 import com.github.quantumxiaol.craftmaid.anchor.AnchorType;
 import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
+import com.github.quantumxiaol.craftmaid.combat.MaidCombatPolicy;
+import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
 import com.github.quantumxiaol.craftmaid.interaction.CitizensMaidInteractionListener;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.InventoryInsertResult;
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
+import java.lang.reflect.Field;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.Trait;
@@ -26,6 +31,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Vector;
 
 public final class CitizensMaidNpcService implements MaidNpcService {
   private static final String CITIZENS_PLUGIN = "Citizens";
@@ -33,9 +39,13 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private static final String SENTINEL_PLUGIN = "Sentinel";
   private static final String SENTINEL_TRAIT_CLASS = "org.mcmonkey.sentinel.SentinelTrait";
   private static final float DEFAULT_NAVIGATOR_SPEED = 1.0F;
+  private static final long FIGHTBACK_TARGET_TICKS = 15L * 20L;
 
   private final CraftMaid plugin;
+  private final Map<String, BukkitTask> guardFightbackCleanupTasks = new HashMap<>();
   private BukkitTask followTask;
+  private Location followLastLocation;
+  private int followStuckTicks;
   private boolean guarding;
 
   public CitizensMaidNpcService(CraftMaid plugin) {
@@ -62,6 +72,15 @@ public final class CitizensMaidNpcService implements MaidNpcService {
         && npc.isSpawned()
         && npc.getEntity() != null
         && npc.getEntity().getUniqueId().equals(entity.getUniqueId());
+  }
+
+  @Override
+  public LivingEntity getMaidLivingEntity() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null || !npc.isSpawned() || !(npc.getEntity() instanceof LivingEntity living)) {
+      return null;
+    }
+    return living;
   }
 
   @Override
@@ -98,6 +117,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
 
     stopFollowing();
+    cancelGuardFightbackTargets();
+    plugin.getMaidCombatBuffService().stop();
     guarding = false;
     if (npc.isSpawned()) {
       npc.despawn();
@@ -202,7 +223,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     stopFollowing();
     NPC followNpc = npc;
     configureFollowNavigation(followNpc);
-    followNpc.getNavigator().setTarget(player, false);
+    updateFollowTarget(followNpc, player);
+    long updateTicks = Math.max(1L, plugin.getMaidFollowSettings().updateTicks());
     followTask =
         Bukkit.getScheduler()
             .runTaskTimer(
@@ -213,10 +235,10 @@ public final class CitizensMaidNpcService implements MaidNpcService {
                     return;
                   }
                   configureFollowNavigation(followNpc);
-                  followNpc.getNavigator().setTarget(player, false);
+                  updateFollowTarget(followNpc, player);
                 },
-                20L,
-                20L);
+                updateTicks,
+                updateTicks);
     return true;
   }
 
@@ -226,6 +248,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       followTask.cancel();
       followTask = null;
     }
+    followLastLocation = null;
+    followStuckTicks = 0;
 
     NPC npc = getStoredNpcOrNull();
     if (npc != null && npc.isSpawned()) {
@@ -511,6 +535,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, player.getUniqueId());
       configureSentinelCombat(trait);
       guarding = true;
+      plugin.getMaidCombatBuffService().start();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("启动 Sentinel 护卫失败: " + rootMessage(ex));
@@ -541,6 +566,41 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     return configureSentinelGuard(npc, location, "定点守卫");
   }
 
+  @Override
+  public boolean markGuardFightbackTarget(Entity entity) {
+    if (entity == null || !guarding || !isGuardAvailable()) {
+      return false;
+    }
+
+    MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
+    if (policy == null || !policy.isFightbackTarget(entity)) {
+      return false;
+    }
+
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    String targetKey = policy.sentinelKeyFor(entity.getType());
+    if (targetKey.isBlank()) {
+      return false;
+    }
+
+    try {
+      Object trait = getSentinelTrait(npc);
+      optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
+      optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, targetKey);
+      optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, targetKey);
+      invoke(trait, "addTarget", new Class<?>[] {String.class}, targetKey);
+      scheduleGuardFightbackCleanup(targetKey);
+      return true;
+    } catch (ReflectiveOperationException | LinkageError ex) {
+      plugin.getLogger().warning("添加 Sentinel 反击目标失败 " + targetKey + ": " + rootMessage(ex));
+      return false;
+    }
+  }
+
   private boolean configureSentinelGuard(NPC npc, Location guardLocation, String label) {
     try {
       Object trait = getSentinelTrait(npc);
@@ -548,6 +608,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       configureSentinelCombat(trait);
       guarding = true;
+      plugin.getMaidCombatBuffService().start();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("启动 Sentinel " + label + "失败: " + rootMessage(ex));
@@ -557,17 +618,20 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean stopGuarding() {
+    cancelGuardFightbackTargets();
     NPC npc = getStoredNpcOrNull();
     if (npc == null || !isGuardAvailable()) {
+      guarding = false;
+      plugin.getMaidCombatBuffService().stop();
       return false;
     }
 
     try {
       Object trait = getSentinelTrait(npc);
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
-      invoke(trait, "removeTarget", new Class<?>[] {String.class}, "monsters");
-      invoke(trait, "removeAvoid", new Class<?>[] {String.class}, "creepers");
+      cleanupSentinelCombat(trait);
       guarding = false;
+      plugin.getMaidCombatBuffService().stop();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("停止 Sentinel 护卫失败: " + rootMessage(ex));
@@ -614,11 +678,160 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private void configureFollowNavigation(NPC npc) {
-    npc.getNavigator().getLocalParameters().speed((float) plugin.getMaidFollowSpeed());
+    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
+    var parameters = npc.getNavigator().getLocalParameters();
+    parameters.speed((float) settings.speed());
+    parameters.updatePathRate(settings.updateTicks());
+    parameters.distanceMargin(settings.stopDistance());
+    parameters.pathDistanceMargin(settings.stopDistance());
+    parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
+    parameters.destinationTeleportMargin(settings.destinationTeleportMargin());
   }
 
   private void resetNavigatorSpeed(NPC npc) {
     npc.getNavigator().getLocalParameters().speed(DEFAULT_NAVIGATOR_SPEED);
+  }
+
+  private void updateFollowTarget(NPC npc, Player player) {
+    if (npc.getEntity() == null) {
+      return;
+    }
+
+    CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
+    Location npcLocation = npc.getEntity().getLocation();
+    Location playerLocation = player.getLocation();
+
+    if (npcLocation.getWorld() == null
+        || playerLocation.getWorld() == null
+        || !npcLocation.getWorld().equals(playerLocation.getWorld())) {
+      teleportNearPlayer(npc, player);
+      return;
+    }
+
+    double distanceSquared = npcLocation.distanceSquared(playerLocation);
+    double stopDistanceSquared = settings.stopDistance() * settings.stopDistance();
+    double startDistanceSquared = settings.startDistance() * settings.startDistance();
+    double teleportDistanceSquared = settings.teleportDistance() * settings.teleportDistance();
+
+    if (distanceSquared <= stopDistanceSquared) {
+      npc.getNavigator().cancelNavigation();
+      npc.faceLocation(player.getEyeLocation());
+      followLastLocation = npcLocation;
+      followStuckTicks = 0;
+      return;
+    }
+
+    if (distanceSquared >= teleportDistanceSquared || isFollowStuck(npcLocation, settings)) {
+      teleportNearPlayer(npc, player);
+      return;
+    }
+
+    if (distanceSquared >= startDistanceSquared) {
+      npc.getNavigator().setTarget(player, false);
+    } else {
+      npc.faceLocation(player.getEyeLocation());
+    }
+  }
+
+  private boolean isFollowStuck(Location npcLocation, CraftMaidConfig.FollowSettings settings) {
+    if (settings.teleportOnStuckSeconds() <= 0) {
+      followLastLocation = npcLocation;
+      followStuckTicks = 0;
+      return false;
+    }
+    if (followLastLocation == null
+        || followLastLocation.getWorld() == null
+        || !followLastLocation.getWorld().equals(npcLocation.getWorld())) {
+      followLastLocation = npcLocation;
+      followStuckTicks = 0;
+      return false;
+    }
+
+    if (followLastLocation.distanceSquared(npcLocation) < 0.0625) {
+      followStuckTicks += settings.updateTicks();
+    } else {
+      followStuckTicks = 0;
+      followLastLocation = npcLocation;
+    }
+    return followStuckTicks >= settings.teleportOnStuckSeconds() * 20;
+  }
+
+  private void teleportNearPlayer(NPC npc, Player player) {
+    Location target = findSafeFollowLocation(player);
+    npc.getNavigator().cancelNavigation();
+    npc.teleport(target, PlayerTeleportEvent.TeleportCause.PLUGIN);
+    npc.faceLocation(player.getEyeLocation());
+    followLastLocation = target;
+    followStuckTicks = 0;
+  }
+
+  private Location findSafeFollowLocation(Player player) {
+    Location playerLocation = player.getLocation();
+    Vector backward = playerLocation.getDirection().setY(0);
+    if (backward.lengthSquared() < 0.0001) {
+      backward = new Vector(0, 0, 1);
+    } else {
+      backward.normalize().multiply(-1);
+    }
+
+    double[][] offsets = {
+      {backward.getX() * 2.0, backward.getZ() * 2.0},
+      {backward.getZ() * 2.0, -backward.getX() * 2.0},
+      {-backward.getZ() * 2.0, backward.getX() * 2.0},
+      {0.0, 0.0},
+      {2.0, 0.0},
+      {-2.0, 0.0},
+      {0.0, 2.0},
+      {0.0, -2.0}
+    };
+
+    for (double[] offset : offsets) {
+      Location candidate = playerLocation.clone().add(offset[0], 0.0, offset[1]);
+      candidate.setYaw(playerLocation.getYaw());
+      candidate.setPitch(0.0F);
+      Location safe = findSafeVerticalLocation(candidate);
+      if (safe != null) {
+        return safe;
+      }
+    }
+    return playerLocation;
+  }
+
+  private Location findSafeVerticalLocation(Location candidate) {
+    if (candidate.getWorld() == null) {
+      return null;
+    }
+
+    int baseY = candidate.getBlockY();
+    int minY = candidate.getWorld().getMinHeight() + 1;
+    int maxY = candidate.getWorld().getMaxHeight() - 2;
+    for (int yOffset = 0; yOffset <= 3; yOffset++) {
+      Location up = candidate.clone();
+      up.setY(Math.min(maxY, baseY + yOffset));
+      if (isSafeStandingLocation(up)) {
+        return centerOnBlock(up);
+      }
+
+      Location down = candidate.clone();
+      down.setY(Math.max(minY, baseY - yOffset));
+      if (isSafeStandingLocation(down)) {
+        return centerOnBlock(down);
+      }
+    }
+    return null;
+  }
+
+  private boolean isSafeStandingLocation(Location location) {
+    return location.getBlock().isPassable()
+        && location.clone().add(0, 1, 0).getBlock().isPassable()
+        && location.clone().add(0, -1, 0).getBlock().getType().isSolid();
+  }
+
+  private Location centerOnBlock(Location location) {
+    Location centered = location.clone();
+    centered.setX(location.getBlockX() + 0.5);
+    centered.setZ(location.getBlockZ() + 0.5);
+    return centered;
   }
 
   private boolean applyConfiguredSkin(NPC npc, Player fallbackPlayer) {
@@ -687,12 +900,95 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private void configureSentinelCombat(Object trait) throws ReflectiveOperationException {
-    invoke(trait, "addTarget", new Class<?>[] {String.class}, "monsters");
-    invoke(trait, "addAvoid", new Class<?>[] {String.class}, "creepers");
+    cancelGuardFightbackTargets();
+    cleanupSentinelCombat(trait);
+    MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
+    for (String target : policy.hostileTargetKeys()) {
+      optionalInvokeWarn(
+          trait, "addTarget", new Class<?>[] {String.class}, target, "Sentinel target");
+    }
+    for (String avoid : policy.avoidTargetKeys()) {
+      optionalInvokeWarn(trait, "addAvoid", new Class<?>[] {String.class}, avoid, "Sentinel avoid");
+      optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, avoid);
+    }
+
     optionalSetField(trait, "enemyDrops", plugin.isMaidEnemyDropsEnabled());
     optionalSetField(trait, "range", 18.0);
     optionalSetField(trait, "guardDistanceMinimum", 4.0);
     optionalSetField(trait, "guardSelectionRange", 6.0);
+    configureSentinelSurvivability(trait);
+  }
+
+  private void scheduleGuardFightbackCleanup(String targetKey) {
+    BukkitTask existingTask = guardFightbackCleanupTasks.remove(targetKey);
+    if (existingTask != null) {
+      existingTask.cancel();
+    }
+    BukkitTask task =
+        Bukkit.getScheduler()
+            .runTaskLater(
+                plugin, () -> clearGuardFightbackTarget(targetKey), FIGHTBACK_TARGET_TICKS);
+    guardFightbackCleanupTasks.put(targetKey, task);
+  }
+
+  private void clearGuardFightbackTarget(String targetKey) {
+    guardFightbackCleanupTasks.remove(targetKey);
+    if (!guarding || !isGuardAvailable()) {
+      return;
+    }
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return;
+    }
+
+    try {
+      Object trait = getSentinelTrait(npc);
+      optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
+      MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
+      if (policy != null && policy.avoidTargetKeys().contains(targetKey)) {
+        optionalInvokeIgnored(trait, "addAvoid", new Class<?>[] {String.class}, targetKey);
+        optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, targetKey);
+      }
+    } catch (ClassNotFoundException | LinkageError ex) {
+      plugin.getLogger().fine("清理 Sentinel 反击目标失败 " + targetKey + ": " + rootMessage(ex));
+    }
+  }
+
+  private void cancelGuardFightbackTargets() {
+    for (BukkitTask task : guardFightbackCleanupTasks.values()) {
+      task.cancel();
+    }
+    guardFightbackCleanupTasks.clear();
+  }
+
+  private void cleanupSentinelCombat(Object trait) {
+    MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
+    if (policy == null) {
+      return;
+    }
+    for (String target : policy.managedTargetKeys()) {
+      optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, target);
+    }
+    for (String avoid : policy.managedAvoidKeys()) {
+      optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, avoid);
+      optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, avoid);
+    }
+  }
+
+  private void configureSentinelSurvivability(Object trait) {
+    CraftMaidConfig.SurvivabilitySettings settings = plugin.getMaidSurvivabilitySettings();
+    if (settings == null || !settings.enabled()) {
+      return;
+    }
+    optionalSetField(trait, "health", settings.sentinelHealth());
+    optionalInvokeIgnored(
+        trait, "setHealth", new Class<?>[] {double.class}, settings.sentinelHealth());
+    optionalSetField(trait, "armor", settings.sentinelArmor());
+    optionalSetField(trait, "healRate", settings.sentinelHealrateSeconds());
+    optionalSetField(trait, "respawnTime", settings.sentinelRespawnSeconds());
+    optionalSetField(trait, "invincible", settings.sentinelInvincible());
+    optionalSetField(trait, "protected", settings.sentinelProtected());
+    optionalSetField(trait, "fightback", settings.sentinelFightback());
   }
 
   private void invoke(Object target, String methodName, Class<?>[] parameterTypes, Object... args)
@@ -710,9 +1006,47 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
   }
 
+  private void optionalInvokeIgnored(
+      Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
+    try {
+      invoke(target, methodName, parameterTypes, args);
+    } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
+      // Sentinel versions differ in helper names; missing optional helpers are harmless.
+    }
+  }
+
+  private void optionalInvokeWarn(
+      Object target, String methodName, Class<?>[] parameterTypes, Object arg, String label) {
+    try {
+      invoke(target, methodName, parameterTypes, arg);
+    } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ex) {
+      plugin.getLogger().warning("跳过 " + label + " " + arg + ": " + rootMessage(ex));
+    }
+  }
+
   private void setField(Object target, String fieldName, Object value)
       throws ReflectiveOperationException {
-    target.getClass().getField(fieldName).set(target, value);
+    Field field = target.getClass().getField(fieldName);
+    field.set(target, convertFieldValue(field.getType(), value));
+  }
+
+  private Object convertFieldValue(Class<?> fieldType, Object value) {
+    if (!(value instanceof Number number)) {
+      return value;
+    }
+    if (fieldType == int.class || fieldType == Integer.class) {
+      return number.intValue();
+    }
+    if (fieldType == long.class || fieldType == Long.class) {
+      return number.longValue();
+    }
+    if (fieldType == float.class || fieldType == Float.class) {
+      return number.floatValue();
+    }
+    if (fieldType == double.class || fieldType == Double.class) {
+      return number.doubleValue();
+    }
+    return value;
   }
 
   private void optionalSetField(Object target, String fieldName, Object value) {
