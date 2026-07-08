@@ -203,6 +203,14 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean markSelfDefenseTarget(Player player, int durationSeconds) {
+    return false;
+  }
+
+  @Override
+  public void forgiveCombatTarget(Player player) {}
+
+  @Override
   public boolean stopGuarding() {
     return false;
   }

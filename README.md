@@ -157,6 +157,17 @@ maid:
     enemy_drops: true # Sentinel 护卫击杀敌怪时允许掉落物
     enemy_exp: true # NPC 击杀敌怪且死亡经验为 0 时尝试补基础经验
     default_enemy_exp: 5
+    owner_damage_policy: cancel # 主人误伤女仆默认取消伤害，且女仆不还手
+    owner_attack_message: true
+    self_defense:
+      enabled: true # 非主人玩家攻击女仆时，短时触发自卫
+      target_players: true
+      target_master: false
+      duration_seconds: 20
+      max_chase_distance: 24.0
+      forgive_when_attacker_far: true
+    guard_fightback:
+      enabled: true # 护主模式下，中立目标攻击主人后短时反击
     survivability:
       enabled: true
       sentinel_health: 40.0
@@ -165,7 +176,7 @@ maid:
       sentinel_respawn_seconds: 10
       sentinel_invincible: false
       sentinel_protected: true
-      sentinel_fightback: true
+      sentinel_fightback: false
       potion_buffs: true
       regeneration_amplifier: 0
       resistance_amplifier: 0
@@ -271,7 +282,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.survivability`、`perception`、`conversation.summary.*`、`jobs.navigation` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.owner_damage_policy`、`maid.combat.self_defense`、`maid.combat.guard_fightback`、`maid.combat.survivability`、`perception`、`conversation.summary.*`、`jobs.navigation` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -408,7 +419,7 @@ regions:
       pos2: ...
 ```
 
-护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。CraftMaid 不再额外取消女仆造成的伤害，目标控制交给 Sentinel 配置。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
+护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫，超时或跑远后停战。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
 
 `maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
 

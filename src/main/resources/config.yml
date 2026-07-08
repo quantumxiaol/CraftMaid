@@ -92,6 +92,22 @@ maid:
     # NPC 击杀不一定被服务端当成玩家击杀；死亡经验为 0 且插件能识别最后一击来源时，尝试补一个基础经验值。
     enemy_exp: true
     default_enemy_exp: 5
+    # 主人误伤女仆时的策略：
+    # cancel：取消伤害并让女仆不还手；allow_no_retaliate：允许伤害但不还手；
+    # allow_and_retaliate：完全交给 Sentinel / 服务器战斗规则。
+    owner_damage_policy: cancel
+    owner_attack_message: true
+    self_defense:
+      # 非主人玩家攻击女仆时，短时把该玩家作为自卫目标。
+      enabled: true
+      target_players: true
+      target_master: false
+      duration_seconds: 20
+      max_chase_distance: 24.0
+      forgive_when_attacker_far: true
+    guard_fightback:
+      # 护主模式下，中立/条件敌对目标攻击主人后，女仆短时反击。
+      enabled: true
     survivability:
       enabled: true
       # Sentinel 虚拟生存属性，不显示盔甲。
@@ -101,7 +117,8 @@ maid:
       sentinel_respawn_seconds: 10
       sentinel_invincible: false
       sentinel_protected: true
-      sentinel_fightback: true
+      # 不使用 Sentinel 自带“谁打我就永久追谁”的 fightback，避免误伤主人后还手。
+      sentinel_fightback: false
       # Bukkit 隐藏药水效果，只在护卫中周期刷新。
       potion_buffs: true
       regeneration_amplifier: 0

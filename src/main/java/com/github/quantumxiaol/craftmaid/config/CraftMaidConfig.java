@@ -1,6 +1,7 @@
 package com.github.quantumxiaol.craftmaid.config;
 
 import java.util.List;
+import java.util.Locale;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public record CraftMaidConfig(
@@ -125,6 +126,27 @@ public record CraftMaidConfig(
                 getConfigStringList(
                     plugin, "maid.combat.fightback_targets", DEFAULT_FIGHTBACK_TARGETS),
                 getConfigStringList(plugin, "maid.combat.avoid_targets", DEFAULT_AVOID_TARGETS),
+                normalizeOwnerDamagePolicy(
+                    getConfigString(plugin, "maid.combat.owner_damage_policy", "cancel")),
+                plugin.getConfig().getBoolean("maid.combat.owner_attack_message", true),
+                new SelfDefenseSettings(
+                    plugin.getConfig().getBoolean("maid.combat.self_defense.enabled", true),
+                    plugin.getConfig().getBoolean("maid.combat.self_defense.target_players", true),
+                    plugin.getConfig().getBoolean("maid.combat.self_defense.target_master", false),
+                    Math.max(
+                        1,
+                        plugin.getConfig().getInt("maid.combat.self_defense.duration_seconds", 20)),
+                    clamp(
+                        plugin
+                            .getConfig()
+                            .getDouble("maid.combat.self_defense.max_chase_distance", 24.0),
+                        1.0,
+                        128.0),
+                    plugin
+                        .getConfig()
+                        .getBoolean("maid.combat.self_defense.forgive_when_attacker_far", true)),
+                new GuardFightbackSettings(
+                    plugin.getConfig().getBoolean("maid.combat.guard_fightback.enabled", true)),
                 new SurvivabilitySettings(
                     plugin.getConfig().getBoolean("maid.combat.survivability.enabled", true),
                     clamp(
@@ -158,7 +180,7 @@ public record CraftMaidConfig(
                         .getBoolean("maid.combat.survivability.sentinel_protected", true),
                     plugin
                         .getConfig()
-                        .getBoolean("maid.combat.survivability.sentinel_fightback", true),
+                        .getBoolean("maid.combat.survivability.sentinel_fightback", false),
                     plugin.getConfig().getBoolean("maid.combat.survivability.potion_buffs", true),
                     Math.max(
                         0,
@@ -310,6 +332,15 @@ public record CraftMaidConfig(
     return Math.max(min, Math.min(max, value));
   }
 
+  private static String normalizeOwnerDamagePolicy(String value) {
+    String normalized =
+        value == null ? "cancel" : value.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+    return switch (normalized) {
+      case "allow_no_retaliate", "allow_and_retaliate" -> normalized;
+      default -> "cancel";
+    };
+  }
+
   public record LlmSettings(
       String baseUrl,
       String apiKey,
@@ -347,7 +378,21 @@ public record CraftMaidConfig(
       List<String> hostileTargets,
       List<String> fightbackTargets,
       List<String> avoidTargets,
+      String ownerDamagePolicy,
+      boolean ownerAttackMessage,
+      SelfDefenseSettings selfDefense,
+      GuardFightbackSettings guardFightback,
       SurvivabilitySettings survivability) {}
+
+  public record SelfDefenseSettings(
+      boolean enabled,
+      boolean targetPlayers,
+      boolean targetMaster,
+      int durationSeconds,
+      double maxChaseDistance,
+      boolean forgiveWhenAttackerFar) {}
+
+  public record GuardFightbackSettings(boolean enabled) {}
 
   public record SurvivabilitySettings(
       boolean enabled,

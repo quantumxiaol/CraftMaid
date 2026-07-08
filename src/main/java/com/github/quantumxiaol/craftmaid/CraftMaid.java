@@ -4,6 +4,7 @@ import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService;
 import com.github.quantumxiaol.craftmaid.combat.MaidCombatBuffService;
 import com.github.quantumxiaol.craftmaid.combat.MaidCombatFightbackListener;
 import com.github.quantumxiaol.craftmaid.combat.MaidCombatPolicy;
+import com.github.quantumxiaol.craftmaid.combat.MaidDamagePolicyListener;
 import com.github.quantumxiaol.craftmaid.combat.MaidLootListener;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
@@ -59,6 +60,7 @@ public final class CraftMaid extends JavaPlugin {
     getServer().getPluginManager().registerEvents(chatListener, this);
     getServer().getPluginManager().registerEvents(maidMenuService, this);
     getServer().getPluginManager().registerEvents(new MaidLootListener(this), this);
+    getServer().getPluginManager().registerEvents(new MaidDamagePolicyListener(this), this);
     getServer().getPluginManager().registerEvents(new MaidCombatFightbackListener(this), this);
     maidNpcService.registerInteractionListener(maidMenuService);
 
