@@ -25,6 +25,10 @@ public class CraftMaidCommand implements TabExecutor {
       List.of(
           "help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region", "job",
           "fishing", "chunk", "harvest");
+  private static final List<String> ADMIN_SUBCOMMANDS =
+      List.of("reload", "spawn", "despawn", "forget");
+  private static final List<String> CONTROL_SUBCOMMANDS =
+      List.of("follow", "anchor", "region", "job", "fishing", "chunk", "harvest");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
   private static final List<String> JOB_ACTIONS = List.of("status", "stop");
   private static final List<String> FISHING_ACTIONS = List.of("start", "stop");
@@ -58,17 +62,26 @@ public class CraftMaidCommand implements TabExecutor {
       @NotNull Command command,
       @NotNull String label,
       @NotNull String[] args) {
-    if (!sender.hasPermission("craftmaid.admin")) {
-      sender.sendMessage(Component.text("你没有权限执行此命令。", NamedTextColor.RED));
-      return true;
-    }
-
     if (args.length == 0 || args[0].equalsIgnoreCase("help")) {
+      if (!canView(sender)) {
+        sender.sendMessage(Component.text("你没有权限查看 CraftMaid 命令。", NamedTextColor.RED));
+        return true;
+      }
       sendHelp(sender, label);
       return true;
     }
 
-    switch (args[0].toLowerCase(Locale.ROOT)) {
+    String subcommand = args[0].toLowerCase(Locale.ROOT);
+    if (ADMIN_SUBCOMMANDS.contains(subcommand) && !sender.hasPermission("craftmaid.admin")) {
+      sender.sendMessage(Component.text("这个命令需要 craftmaid.admin 权限。", NamedTextColor.RED));
+      return true;
+    }
+    if (CONTROL_SUBCOMMANDS.contains(subcommand) && !canControl(sender)) {
+      sender.sendMessage(Component.text("只有主人或授权玩家可以控制女仆。", NamedTextColor.RED));
+      return true;
+    }
+
+    switch (subcommand) {
       case "reload" -> {
         plugin.reloadPlugin();
         sender.sendMessage(Component.text("CraftMaid 配置已重新加载。", NamedTextColor.GREEN));
@@ -128,13 +141,17 @@ public class CraftMaidCommand implements TabExecutor {
       @NotNull Command command,
       @NotNull String label,
       @NotNull String[] args) {
-    if (!sender.hasPermission("craftmaid.admin")) {
-      return Collections.emptyList();
-    }
-
     if (args.length == 1) {
       String prefix = args[0].toLowerCase(Locale.ROOT);
-      return SUBCOMMANDS.stream().filter(subcommand -> subcommand.startsWith(prefix)).toList();
+      return SUBCOMMANDS.stream()
+          .filter(
+              subcommand ->
+                  subcommand.equals("help")
+                      || (ADMIN_SUBCOMMANDS.contains(subcommand)
+                          && sender.hasPermission("craftmaid.admin"))
+                      || (CONTROL_SUBCOMMANDS.contains(subcommand) && canControl(sender)))
+          .filter(subcommand -> subcommand.startsWith(prefix))
+          .toList();
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
@@ -242,6 +259,20 @@ public class CraftMaidCommand implements TabExecutor {
     }
 
     return Collections.emptyList();
+  }
+
+  private boolean canView(CommandSender sender) {
+    if (sender instanceof Player player) {
+      return plugin.canViewMaid(player);
+    }
+    return sender.hasPermission("craftmaid.admin");
+  }
+
+  private boolean canControl(CommandSender sender) {
+    if (sender instanceof Player player) {
+      return plugin.canControlMaid(player);
+    }
+    return sender.hasPermission("craftmaid.admin");
   }
 
   private void spawnMaid(CommandSender sender) {

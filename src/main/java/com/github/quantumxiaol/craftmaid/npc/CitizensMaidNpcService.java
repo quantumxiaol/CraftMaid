@@ -12,9 +12,11 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -45,8 +47,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private final CraftMaid plugin;
   private final Map<String, BukkitTask> guardFightbackCleanupTasks = new HashMap<>();
-  private final Map<UUID, BukkitTask> selfDefenseCleanupTasks = new HashMap<>();
-  private final Map<UUID, List<String>> selfDefenseTargetKeys = new HashMap<>();
+  private final Set<String> reportedSentinelCompatibilityIssues = new HashSet<>();
   private BukkitTask followTask;
   private Location followLastLocation;
   private int followStuckTicks;
@@ -124,7 +125,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
     stopFollowing();
     cancelGuardFightbackTargets();
-    cancelSelfDefenseTargets();
+    plugin.clearMaidSelfDefenseTargets();
     plugin.getMaidCombatBuffService().stop();
     guarding = false;
     if (npc.isSpawned()) {
@@ -289,7 +290,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   public boolean prepareForJobControl(boolean clearGuarding) {
     stopFollowing();
     stopFishingAnimation();
-    cancelSelfDefenseTargets();
+    plugin.clearMaidSelfDefenseTargets();
     boolean guardCleared = true;
     if (clearGuarding) {
       NPC npc = getStoredNpcOrNull();
@@ -676,8 +677,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
-  public boolean markSelfDefenseTarget(Player player, int durationSeconds) {
-    if (player == null || durationSeconds <= 0 || !isGuardAvailable()) {
+  public boolean addSelfDefenseTarget(Player player) {
+    if (player == null || !isGuardAvailable()) {
       return false;
     }
 
@@ -686,30 +687,43 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
 
-    List<String> targetKeys = sentinelPlayerTargetKeys(player);
+    String targetKey = sentinelPlayerTargetKey(player.getUniqueId());
     try {
       Object trait = getSentinelTrait(npc);
-      for (String targetKey : targetKeys) {
-        optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, targetKey);
-        optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, targetKey);
-        optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
-        optionalInvokeIgnored(trait, "addTarget", new Class<?>[] {String.class}, targetKey);
-      }
-      scheduleSelfDefenseCleanup(player.getUniqueId(), targetKeys, durationSeconds);
+      optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, targetKey);
+      optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, targetKey);
+      optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
+      invoke(trait, "addTarget", new Class<?>[] {String.class}, targetKey);
       return true;
-    } catch (ClassNotFoundException | LinkageError ex) {
+    } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("添加 Sentinel 自卫目标失败 " + player.getName() + ": " + rootMessage(ex));
       return false;
     }
   }
 
   @Override
-  public void forgiveCombatTarget(Player player) {
-    if (player == null) {
+  public void removeSelfDefenseTarget(UUID playerId, String playerName) {
+    if (playerId == null || !isGuardAvailable()) {
       return;
     }
-    clearSelfDefenseTarget(player.getUniqueId());
-    removeSentinelTargets(sentinelPlayerTargetKeys(player));
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return;
+    }
+
+    try {
+      Object trait = getSentinelTrait(npc);
+      optionalInvokeIgnored(
+          trait, "removeTarget", new Class<?>[] {String.class}, sentinelPlayerTargetKey(playerId));
+      if (playerName != null && !playerName.isBlank()) {
+        for (String legacyKey : sentinelLegacyPlayerTargetKeys(playerName)) {
+          optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, legacyKey);
+        }
+      }
+      optionalInvokeIgnored(trait, "whenAnEnemyDies", new Class<?>[] {UUID.class}, playerId);
+    } catch (ClassNotFoundException | LinkageError ex) {
+      plugin.getLogger().fine("清理 Sentinel 自卫目标失败: " + rootMessage(ex));
+    }
   }
 
   private boolean configureSentinelGuard(NPC npc, Location guardLocation, String label) {
@@ -734,7 +748,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private boolean clearSentinelGuardingState(boolean stopNavigation, boolean warnOnFailure) {
     cancelGuardFightbackTargets();
-    cancelSelfDefenseTargets();
+    plugin.clearMaidSelfDefenseTargets();
     guarding = false;
     plugin.getMaidCombatBuffService().stop();
     NPC npc = getStoredNpcOrNull();
@@ -1083,23 +1097,33 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private void configureSentinelCombat(Object trait) throws ReflectiveOperationException {
     cancelGuardFightbackTargets();
-    cancelSelfDefenseTargets();
+    plugin.clearMaidSelfDefenseTargets();
     cleanupSentinelCombat(trait);
+    List<String> unsupported = new ArrayList<>();
     MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
     for (String target : policy.hostileTargetKeys()) {
-      optionalInvokeWarn(
-          trait, "addTarget", new Class<?>[] {String.class}, target, "Sentinel target");
+      if (!optionalInvokeSupported(trait, "addTarget", new Class<?>[] {String.class}, target)) {
+        unsupported.add("target:" + target);
+      }
     }
     for (String avoid : policy.avoidTargetKeys()) {
-      optionalInvokeWarn(trait, "addAvoid", new Class<?>[] {String.class}, avoid, "Sentinel avoid");
+      if (!optionalInvokeSupported(trait, "addAvoid", new Class<?>[] {String.class}, avoid)) {
+        unsupported.add("avoid:" + avoid);
+      }
       optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, avoid);
     }
 
-    optionalSetField(trait, "enemyDrops", plugin.isMaidEnemyDropsEnabled());
-    optionalSetField(trait, "range", 18.0);
-    optionalSetField(trait, "guardDistanceMinimum", 4.0);
-    optionalSetField(trait, "guardSelectionRange", 6.0);
-    configureSentinelSurvivability(trait);
+    collectUnsupportedField(
+        unsupported,
+        "enemyDrops",
+        optionalSetField(trait, "enemyDrops", plugin.isMaidEnemyDropsEnabled()));
+    collectUnsupportedField(unsupported, "range", optionalSetField(trait, "range", 18.0));
+    collectUnsupportedField(
+        unsupported, "guardDistanceMinimum", optionalSetField(trait, "guardDistanceMinimum", 4.0));
+    collectUnsupportedField(
+        unsupported, "guardSelectionRange", optionalSetField(trait, "guardSelectionRange", 6.0));
+    configureSentinelSurvivability(trait, unsupported);
+    reportSentinelCompatibilityIssues(unsupported);
   }
 
   private void scheduleGuardFightbackCleanup(String targetKey) {
@@ -1144,65 +1168,12 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     guardFightbackCleanupTasks.clear();
   }
 
-  private List<String> sentinelPlayerTargetKeys(Player player) {
-    String name = player.getName();
-    return List.of("PLAYER:" + name, "player:" + name);
+  private String sentinelPlayerTargetKey(UUID playerId) {
+    return "uuid:" + playerId;
   }
 
-  private void scheduleSelfDefenseCleanup(
-      UUID playerId, List<String> targetKeys, int durationSeconds) {
-    BukkitTask existingTask = selfDefenseCleanupTasks.remove(playerId);
-    if (existingTask != null) {
-      existingTask.cancel();
-    }
-    selfDefenseTargetKeys.put(playerId, List.copyOf(targetKeys));
-    BukkitTask task =
-        Bukkit.getScheduler()
-            .runTaskLater(plugin, () -> clearSelfDefenseTarget(playerId), durationSeconds * 20L);
-    selfDefenseCleanupTasks.put(playerId, task);
-  }
-
-  private void clearSelfDefenseTarget(UUID playerId) {
-    BukkitTask task = selfDefenseCleanupTasks.remove(playerId);
-    if (task != null) {
-      task.cancel();
-    }
-    List<String> targetKeys = selfDefenseTargetKeys.remove(playerId);
-    if (targetKeys != null) {
-      removeSentinelTargets(targetKeys);
-    }
-  }
-
-  private void cancelSelfDefenseTargets() {
-    for (BukkitTask task : selfDefenseCleanupTasks.values()) {
-      task.cancel();
-    }
-    selfDefenseCleanupTasks.clear();
-    List<List<String>> targets = new ArrayList<>(selfDefenseTargetKeys.values());
-    selfDefenseTargetKeys.clear();
-    for (List<String> targetKeys : targets) {
-      removeSentinelTargets(targetKeys);
-    }
-  }
-
-  private void removeSentinelTargets(List<String> targetKeys) {
-    if (targetKeys == null || targetKeys.isEmpty() || !isGuardAvailable()) {
-      return;
-    }
-
-    NPC npc = getStoredNpcOrNull();
-    if (npc == null) {
-      return;
-    }
-
-    try {
-      Object trait = getSentinelTrait(npc);
-      for (String targetKey : targetKeys) {
-        optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
-      }
-    } catch (ClassNotFoundException | LinkageError ex) {
-      plugin.getLogger().fine("清理 Sentinel 自卫目标失败: " + rootMessage(ex));
-    }
+  private List<String> sentinelLegacyPlayerTargetKeys(String playerName) {
+    return List.of("PLAYER:" + playerName, "player:" + playerName);
   }
 
   private void cleanupSentinelCombat(Object trait) {
@@ -1219,20 +1190,37 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
   }
 
-  private void configureSentinelSurvivability(Object trait) {
+  private void configureSentinelSurvivability(Object trait, List<String> unsupported) {
     CraftMaidConfig.SurvivabilitySettings settings = plugin.getMaidSurvivabilitySettings();
     if (settings == null || !settings.enabled()) {
       return;
     }
-    optionalSetField(trait, "health", settings.sentinelHealth());
+    collectUnsupportedField(
+        unsupported, "health", optionalSetField(trait, "health", settings.sentinelHealth()));
     optionalInvokeIgnored(
         trait, "setHealth", new Class<?>[] {double.class}, settings.sentinelHealth());
-    optionalSetField(trait, "armor", settings.sentinelArmor());
-    optionalSetField(trait, "healRate", settings.sentinelHealrateSeconds());
-    optionalSetField(trait, "respawnTime", settings.sentinelRespawnSeconds());
-    optionalSetField(trait, "invincible", settings.sentinelInvincible());
-    optionalSetField(trait, "protected", settings.sentinelProtected());
-    optionalSetField(trait, "fightback", settings.sentinelFightback());
+    collectUnsupportedField(
+        unsupported, "armor", optionalSetField(trait, "armor", settings.sentinelArmor()));
+    collectUnsupportedField(
+        unsupported,
+        "healRate",
+        optionalSetField(trait, "healRate", settings.sentinelHealrateSeconds()));
+    collectUnsupportedField(
+        unsupported,
+        "respawnTime",
+        optionalSetField(trait, "respawnTime", settings.sentinelRespawnSeconds()));
+    collectUnsupportedField(
+        unsupported,
+        "invincible",
+        optionalSetField(trait, "invincible", settings.sentinelInvincible()));
+    boolean protectedSet =
+        optionalSetField(trait, "protectFromIgnores", settings.sentinelProtected())
+            || optionalSetField(trait, "protected", settings.sentinelProtected());
+    collectUnsupportedField(unsupported, "protected", protectedSet);
+    collectUnsupportedField(
+        unsupported,
+        "fightback",
+        optionalSetField(trait, "fightback", settings.sentinelFightback()));
   }
 
   private void invoke(Object target, String methodName, Class<?>[] parameterTypes, Object... args)
@@ -1259,12 +1247,13 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
   }
 
-  private void optionalInvokeWarn(
-      Object target, String methodName, Class<?>[] parameterTypes, Object arg, String label) {
+  private boolean optionalInvokeSupported(
+      Object target, String methodName, Class<?>[] parameterTypes, Object arg) {
     try {
       invoke(target, methodName, parameterTypes, arg);
+      return true;
     } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ex) {
-      plugin.getLogger().warning("跳过 " + label + " " + arg + ": " + rootMessage(ex));
+      return false;
     }
   }
 
@@ -1293,11 +1282,29 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     return value;
   }
 
-  private void optionalSetField(Object target, String fieldName, Object value) {
+  private boolean optionalSetField(Object target, String fieldName, Object value) {
     try {
       setField(target, fieldName, value);
+      return true;
     } catch (ReflectiveOperationException | IllegalArgumentException ex) {
-      plugin.getLogger().warning("跳过 Sentinel 可选字段 " + fieldName + ": " + rootMessage(ex));
+      return false;
+    }
+  }
+
+  private void collectUnsupportedField(
+      List<String> unsupported, String fieldName, boolean supported) {
+    if (!supported) {
+      unsupported.add("field:" + fieldName);
+    }
+  }
+
+  private void reportSentinelCompatibilityIssues(List<String> unsupported) {
+    List<String> newlyUnsupported =
+        unsupported.stream().filter(reportedSentinelCompatibilityIssues::add).toList();
+    if (!newlyUnsupported.isEmpty()) {
+      plugin
+          .getLogger()
+          .warning("Sentinel compatibility unsupported: " + String.join(", ", newlyUnsupported));
     }
   }
 

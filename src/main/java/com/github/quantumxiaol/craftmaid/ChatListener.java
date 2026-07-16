@@ -21,7 +21,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -41,6 +43,8 @@ public class ChatListener implements Listener {
   private final Map<UUID, Long> nextAllowedReplyAt = new ConcurrentHashMap<>();
   private final Map<UUID, Long> conversationActiveUntil = new ConcurrentHashMap<>();
   private final Set<UUID> respondingPlayers = ConcurrentHashMap.newKeySet();
+  private final Map<UUID, CompletableFuture<?>> activeRequests = new ConcurrentHashMap<>();
+  private final AtomicLong clientGeneration = new AtomicLong();
   private volatile LlmClient llmClient;
 
   public ChatListener(CraftMaid plugin, LlmClient llmClient) {
@@ -52,7 +56,15 @@ public class ChatListener implements Listener {
   }
 
   public void updateClient(LlmClient llmClient) {
+    clientGeneration.incrementAndGet();
+    activeRequests.values().forEach(request -> request.cancel(true));
+    activeRequests.clear();
+    respondingPlayers.clear();
     this.llmClient = llmClient;
+  }
+
+  public void shutdown() {
+    updateClient(null);
   }
 
   @EventHandler
@@ -110,9 +122,13 @@ public class ChatListener implements Listener {
     UUID playerId = player.getUniqueId();
     String playerName = player.getName();
     if (!respondingPlayers.add(playerId)) {
+      plugin
+          .getLogger()
+          .fine("Skipped chat: previous turn still pending player=" + player.getName());
       player.sendMessage(Component.text(maidName + " 还在思考刚才的问题，请稍等一下。", NamedTextColor.YELLOW));
       return;
     }
+    long requestGeneration = clientGeneration.get();
 
     if (playerSpeech.isBlank()) {
       playerSpeech = "正在呼唤你，请自然回应。";
@@ -120,7 +136,7 @@ public class ChatListener implements Listener {
     String turnPlayerSpeech = playerSpeech;
 
     if (useJsonTurn) {
-      handleJsonTurn(player, turnPlayerSpeech, client);
+      handleJsonTurn(player, turnPlayerSpeech, client, requestGeneration);
       return;
     }
 
@@ -129,54 +145,59 @@ public class ChatListener implements Listener {
         plugin.getConversationHistory().buildPromptMessages(playerId, userPrompt);
     String systemPrompt = plugin.getSystemPrompt();
 
-    client
-        .askAiAsync(systemPrompt, conversationMessages)
-        .whenComplete(
-            (reply, ex) -> {
-              respondingPlayers.remove(playerId);
-              if (!plugin.isEnabled()) {
-                return;
-              }
+    CompletableFuture<String> request = client.askAiAsync(systemPrompt, conversationMessages);
+    activeRequests.put(playerId, request);
+    request.whenComplete(
+        (reply, ex) -> {
+          if (!isCurrentGeneration(requestGeneration)) {
+            return;
+          }
+          activeRequests.remove(playerId, request);
+          respondingPlayers.remove(playerId);
+          if (!plugin.isEnabled()) {
+            return;
+          }
 
-              if (ex != null) {
-                plugin.getLogger().warning("请求 AI 失败: " + rootMessage(ex));
-                Bukkit.getScheduler()
-                    .runTask(
-                        plugin,
-                        () -> {
-                          if (player.isOnline()) {
-                            player.sendMessage(
-                                Component.text(maidName + " 暂时没有回应，请稍后再试。", NamedTextColor.RED));
-                          }
-                        });
-                return;
-              }
+          if (ex != null) {
+            plugin.getLogger().warning("请求 AI 失败: " + rootMessage(ex));
+            Bukkit.getScheduler()
+                .runTask(
+                    plugin,
+                    () -> {
+                      if (player.isOnline()) {
+                        player.sendMessage(
+                            Component.text(maidName + " 暂时没有回应，请稍后再试。", NamedTextColor.RED));
+                      }
+                    });
+            return;
+          }
 
-              String cleanReply = reply == null ? "" : reply.trim();
-              if (cleanReply.isBlank()) {
-                return;
-              }
+          String cleanReply = reply == null ? "" : reply.trim();
+          if (cleanReply.isBlank()) {
+            return;
+          }
 
-              plugin
-                  .getConversationHistory()
-                  .appendExchange(playerId, playerName, turnPlayerSpeech, cleanReply);
-              triggerMemoryCompression(playerId, client);
-              Bukkit.getScheduler()
-                  .runTask(
-                      plugin,
-                      () -> {
-                        if (!plugin.isEnabled()) {
-                          return;
-                        }
-                        String prefix = plugin.getReplyPrefix().replace("{name}", maidName);
-                        Component replyComponent =
-                            Component.text(prefix + cleanReply, NamedTextColor.LIGHT_PURPLE);
-                        Bukkit.broadcast(replyComponent);
-                      });
-            });
+          plugin
+              .getConversationHistory()
+              .appendExchange(playerId, playerName, turnPlayerSpeech, cleanReply);
+          triggerMemoryCompression(playerId, client, requestGeneration);
+          Bukkit.getScheduler()
+              .runTask(
+                  plugin,
+                  () -> {
+                    if (!plugin.isEnabled()) {
+                      return;
+                    }
+                    String prefix = plugin.getReplyPrefix().replace("{name}", maidName);
+                    Component replyComponent =
+                        Component.text(prefix + cleanReply, NamedTextColor.LIGHT_PURPLE);
+                    Bukkit.broadcast(replyComponent);
+                  });
+        });
   }
 
-  private void handleJsonTurn(Player player, String playerSpeech, LlmClient client) {
+  private void handleJsonTurn(
+      Player player, String playerSpeech, LlmClient client, long requestGeneration) {
     UUID playerId = player.getUniqueId();
     String playerName = player.getName();
     IntentSettings settings = plugin.getIntentSettings();
@@ -184,52 +205,65 @@ public class ChatListener implements Listener {
     List<ConversationMessage> conversationMessages =
         plugin.getConversationHistory().buildPromptMessages(playerId, planPrompt);
 
-    client
-        .askJsonAsync(
+    CompletableFuture<String> planRequest =
+        client.askJsonAsync(
             buildJsonTurnSystemPrompt(),
             conversationMessages,
             settings.planMaxTokens(),
             settings.planTemperature(),
             settings.responseFormatJsonObject(),
-            "plan")
-        .whenComplete(
-            (rawPlan, ex) -> {
-              if (ex != null) {
-                failTurn(player, playerId, "请求动作计划失败: " + rootMessage(ex));
-                return;
-              }
+            "plan");
+    activeRequests.put(playerId, planRequest);
+    planRequest.whenComplete(
+        (rawPlan, ex) -> {
+          if (!isCurrentGeneration(requestGeneration)) {
+            return;
+          }
+          if (ex != null) {
+            failTurn(player, playerId, requestGeneration, "请求动作计划失败: " + rootMessage(ex));
+            return;
+          }
 
-              Optional<MaidActionPlan> plan = actionPlanParser.parse(rawPlan);
-              if (plan.isEmpty()) {
-                failTurn(player, playerId, "女仆没有按 JSON 格式回应，请再说一次。");
-                return;
-              }
+          Optional<MaidActionPlan> plan = actionPlanParser.parse(rawPlan);
+          if (plan.isEmpty()) {
+            failTurn(player, playerId, requestGeneration, "女仆没有按 JSON 格式回应，请再说一次。");
+            return;
+          }
 
-              MaidActionPlan actionPlan = plan.get();
-              if (!actionPlan.hasActions()) {
-                String chat = actionPlan.chat() == null ? "" : actionPlan.chat().trim();
-                if (chat.isBlank()) {
-                  failTurn(player, playerId, "女仆没有想好该怎么回应，请再说一次。");
-                  return;
-                }
-                finishTurn(player, playerId, playerName, playerSpeech, chat, client);
-                return;
-              }
+          MaidActionPlan actionPlan = plan.get();
+          if (!actionPlan.hasActions()) {
+            String chat = actionPlan.chat() == null ? "" : actionPlan.chat().trim();
+            if (chat.isBlank()) {
+              failTurn(player, playerId, requestGeneration, "女仆没有想好该怎么回应，请再说一次。");
+              return;
+            }
+            finishTurn(player, playerId, playerName, playerSpeech, chat, client, requestGeneration);
+            return;
+          }
 
-              Bukkit.getScheduler()
-                  .runTask(
-                      plugin,
-                      () -> {
-                        if (!player.isOnline()) {
-                          respondingPlayers.remove(playerId);
-                          return;
-                        }
-                        MaidActionExecutionResult actionResult =
-                            actionExecutor.execute(player, actionPlan);
-                        requestFinalReply(
-                            player, playerId, playerName, playerSpeech, actionResult, client);
-                      });
-            });
+          Bukkit.getScheduler()
+              .runTask(
+                  plugin,
+                  () -> {
+                    if (!isCurrentGeneration(requestGeneration)) {
+                      return;
+                    }
+                    if (!player.isOnline()) {
+                      clearTurn(playerId);
+                      return;
+                    }
+                    MaidActionExecutionResult actionResult =
+                        actionExecutor.execute(player, actionPlan);
+                    requestFinalReply(
+                        player,
+                        playerId,
+                        playerName,
+                        playerSpeech,
+                        actionResult,
+                        client,
+                        requestGeneration);
+                  });
+        });
   }
 
   private void requestFinalReply(
@@ -238,35 +272,42 @@ public class ChatListener implements Listener {
       String playerName,
       String playerSpeech,
       MaidActionExecutionResult actionResult,
-      LlmClient client) {
+      LlmClient client,
+      long requestGeneration) {
     IntentSettings settings = plugin.getIntentSettings();
     String finalPrompt = buildFinalPrompt(player, playerSpeech, actionResult);
     List<ConversationMessage> conversationMessages =
         plugin.getConversationHistory().buildPromptMessages(playerId, finalPrompt);
-    client
-        .askJsonAsync(
+    CompletableFuture<String> finalRequest =
+        client.askJsonAsync(
             buildJsonTurnSystemPrompt(),
             conversationMessages,
             settings.finalMaxTokens(),
             settings.finalTemperature(),
             settings.responseFormatJsonObject(),
-            "final")
-        .whenComplete(
-            (rawFinal, ex) -> {
-              if (ex != null) {
-                String fallback = fallbackFinalReply(actionResult);
-                plugin.getLogger().warning("请求动作结果回复失败: " + rootMessage(ex));
-                finishTurn(player, playerId, playerName, playerSpeech, fallback, client);
-                return;
-              }
+            "final");
+    activeRequests.put(playerId, finalRequest);
+    finalRequest.whenComplete(
+        (rawFinal, ex) -> {
+          if (!isCurrentGeneration(requestGeneration)) {
+            return;
+          }
+          if (ex != null) {
+            String fallback = fallbackFinalReply(actionResult);
+            plugin.getLogger().warning("请求动作结果回复失败: " + rootMessage(ex));
+            finishTurn(
+                player, playerId, playerName, playerSpeech, fallback, client, requestGeneration);
+            return;
+          }
 
-              String finalChat =
-                  actionPlanParser.parse(rawFinal).map(MaidActionPlan::chat).orElse("").trim();
-              if (finalChat.isBlank()) {
-                finalChat = fallbackFinalReply(actionResult);
-              }
-              finishTurn(player, playerId, playerName, playerSpeech, finalChat, client);
-            });
+          String finalChat =
+              actionPlanParser.parse(rawFinal).map(MaidActionPlan::chat).orElse("").trim();
+          if (finalChat.isBlank()) {
+            finalChat = fallbackFinalReply(actionResult);
+          }
+          finishTurn(
+              player, playerId, playerName, playerSpeech, finalChat, client, requestGeneration);
+        });
   }
 
   private void finishTurn(
@@ -275,8 +316,12 @@ public class ChatListener implements Listener {
       String playerName,
       String playerSpeech,
       String cleanReply,
-      LlmClient client) {
-    respondingPlayers.remove(playerId);
+      LlmClient client,
+      long requestGeneration) {
+    if (!isCurrentGeneration(requestGeneration)) {
+      return;
+    }
+    clearTurn(playerId);
     if (!plugin.isEnabled()) {
       return;
     }
@@ -286,7 +331,7 @@ public class ChatListener implements Listener {
     }
 
     plugin.getConversationHistory().appendExchange(playerId, playerName, playerSpeech, reply);
-    triggerMemoryCompression(playerId, client);
+    triggerMemoryCompression(playerId, client, requestGeneration);
     Bukkit.getScheduler()
         .runTask(
             plugin,
@@ -299,8 +344,11 @@ public class ChatListener implements Listener {
             });
   }
 
-  private void failTurn(Player player, UUID playerId, String message) {
-    respondingPlayers.remove(playerId);
+  private void failTurn(Player player, UUID playerId, long requestGeneration, String message) {
+    if (!isCurrentGeneration(requestGeneration)) {
+      return;
+    }
+    clearTurn(playerId);
     plugin.getLogger().warning(message);
     Bukkit.getScheduler()
         .runTask(
@@ -358,8 +406,7 @@ public class ChatListener implements Listener {
     if (!plugin.getIntentSettings().masterOnly()) {
       return true;
     }
-    return player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName());
+    return plugin.canControlMaid(player);
   }
 
   private boolean tryHandleFallbackIntent(
@@ -562,7 +609,7 @@ public class ChatListener implements Listener {
     return "好的主人。";
   }
 
-  private void triggerMemoryCompression(UUID playerId, LlmClient client) {
+  private void triggerMemoryCompression(UUID playerId, LlmClient client, long requestGeneration) {
     ConversationHistory.CompressionRequest compressionRequest =
         plugin.getConversationHistory().prepareCompression(playerId);
     if (compressionRequest == null) {
@@ -576,7 +623,7 @@ public class ChatListener implements Listener {
             plugin.getConversationSummaryTemperature())
         .whenComplete(
             (memorySummary, ex) -> {
-              if (!plugin.isEnabled()) {
+              if (!plugin.isEnabled() || !isCurrentGeneration(requestGeneration)) {
                 plugin.getConversationHistory().cancelCompression(playerId);
                 return;
               }
@@ -646,6 +693,15 @@ public class ChatListener implements Listener {
 
     nextAllowedReplyAt.put(playerId, now + cooldownSeconds * 1000L);
     return false;
+  }
+
+  private boolean isCurrentGeneration(long requestGeneration) {
+    return requestGeneration == clientGeneration.get();
+  }
+
+  private void clearTurn(UUID playerId) {
+    activeRequests.remove(playerId);
+    respondingPlayers.remove(playerId);
   }
 
   private String rootMessage(Throwable throwable) {

@@ -3,7 +3,12 @@ llm:
   base_url: "https://api.deepseek.com"
   api_key: "your-api-key-here"
   model_name: "deepseek-v4-flash"
+  # 单次 HTTP 请求超时；hard_timeout_seconds 是整次 LLM 调用的最终兜底。
   timeout_seconds: 30
+  hard_timeout_seconds: 40
+  # 仅 plan/chat/memory 在连接重置、超时或 HTTP 502/503/504 时重试；final 不重试动作。
+  transient_retry_count: 1
+  transient_retry_delay_millis: 500
   temperature: 0.7
   max_tokens: 320
 maid:
@@ -12,6 +17,11 @@ maid:
   language: "中文"
   # NPC 皮肤来源：master=使用 maid.master 的皮肤；player=使用触发操作的玩家皮肤；none/default=不主动设置；也可以直接填玩家名。
   skin: "master"
+  access:
+    # false 时 OP/craftmaid.admin 只管理插件，不自动获得女仆控制权；可另授 craftmaid.control。
+    admin_can_control: false
+    # master_only=“保护主人”始终保护 maid.master；current_player=保护发起控制的玩家。
+    guard_target_policy: "master_only"
   follow:
     # Citizens Navigator 默认速度是 1.0；生存疾跑跟随建议 1.7-2.0，过高可能路径抖动。
     speed: 1.75
@@ -175,7 +185,7 @@ perception:
 intent:
   # 有限自然语言意图：由同一个 LLM 输出 JSON action plan，再由 Java 白名单执行；不是开放式 tool call。
   enabled: true
-  # true 时只有 maid.master 或 craftmaid.admin 可以用聊天触发工作。
+  # true 时只有 maid.master、craftmaid.control，或允许控制的管理员可以用聊天触发工作。
   master_only: true
   # 规则 fallback 使用；LLM JSON 模式下有 action 时总会先执行，再生成最终回复。
   consume_on_match: true

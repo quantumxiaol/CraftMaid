@@ -14,7 +14,7 @@ CraftMaid 分成两层能力。
 * **环境感知**：对话时会采集时间、天气、附近实体分组和玩家视线目标；LLM 还可以通过只读 `INSPECT_SURROUNDINGS` action 按需获取周围方块统计、材料 Top、类别比例和场景推测。
 * **多轮记忆**：按玩家 UUID 管理历史；只记录玩家原话和女仆最终回复。超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
-* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作和护卫控制。
+* **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作、解除玩家敌意和护卫控制。
 * **锚点与区域系统**：命名单点 anchor 和命名长方体 region 会保存到 `plugins/CraftMaid/anchors.yml`；region 使用两个角点 `pos1` / `pos2`。
 * **Job 框架骨架**：统一 `MaidJob` / `activeJob` / `JobPhase`，可以查看 `idle` / `fishing` / `chunk_keeper` / `harvest` / `following` / `guarding` 状态，并通过命令或菜单停止当前工作。
 * **模拟钓鱼 MVP**：读取 `fishing_spot/<name>` 和 `pond/<name>`，让女仆走到钓鱼点、面向鱼塘、模拟等待和挥手，随机产出鱼/垃圾/宝藏并放入女仆背包；等待时间、loot 权重、宝藏开关可配置。可选开启实验性 Denizen `/npc fish` 作为表演动画，但 CraftMaid 仍负责产出和背包控制。
@@ -129,6 +129,9 @@ llm:
   api_key: "your-api-key-here" # 你的 API Key
   model_name: "gpt-3.5-turbo" # 你的模型名称，如 qwen-max
   timeout_seconds: 30
+  hard_timeout_seconds: 40 # 整次调用的硬超时，超时后会释放该玩家的对话锁
+  transient_retry_count: 1 # plan/chat/memory 遇到连接重置、超时或 502/503/504 时重试次数
+  transient_retry_delay_millis: 500
   temperature: 0.7
   max_tokens: 320
 maid:
@@ -136,6 +139,9 @@ maid:
   master: "PlayerName" # 你的游戏 ID，女仆会对该玩家展现主人的态度
   language: "中文"
   skin: "master" # NPC 皮肤：master=使用主人皮肤；player=使用触发者皮肤；none/default=不主动设置；也可直接填玩家名
+  access:
+    admin_can_control: false # OP/craftmaid.admin 默认只管理插件，不自动控制女仆
+    guard_target_policy: "master_only" # “保护主人”默认始终保护 maid.master
   follow:
     speed: 1.75 # Citizens Navigator 默认速度是 1.0；生存疾跑建议 1.7-2.0
     update_ticks: 10
@@ -214,7 +220,7 @@ perception:
     max_distance: 10
 intent:
   enabled: true # 有限自然语言意图
-  master_only: true # 只有 maid.master 或 craftmaid.admin 可以用聊天触发工作
+  master_only: true # 只有 maid.master 或 craftmaid.control（或显式允许的 admin）可以用聊天触发工作
   consume_on_match: true # 规则 fallback 使用；LLM JSON 模式下 action 会先执行再回复
   allow_followup_window: true # 允许 followup_seconds 窗口内免唤醒触发工作意图
   llm_json: true # 普通聊天和工作控制统一走 JSON：{chat, actions}
@@ -267,6 +273,9 @@ llm:
   api_key: "你的 DeepSeek API Key"
   model_name: "deepseek-v4-flash"
   timeout_seconds: 30
+  hard_timeout_seconds: 40
+  transient_retry_count: 1
+  transient_retry_delay_millis: 500
   temperature: 0.7
   max_tokens: 320
 conversation:
@@ -282,7 +291,7 @@ conversation:
 
 超过 `conversation.max_messages` 后，插件会把较旧的对话连同已有 Memory 发给 DeepSeek/兼容 OpenAI 的接口，要求模型压成结构化摘要：`玩家偏好`、`已承诺事项`、`世界状态`、`重要关系`、`最近目标`。压缩成功后只保留这份 Memory 和最近 `N/5` 条原始历史；压缩失败时会保留原始历史，不会提前删除。
 
-如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `maid.skin`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.owner_damage_policy`、`maid.combat.self_defense`、`maid.combat.guard_fightback`、`maid.combat.survivability`、`perception`、`conversation.summary.*`、`jobs.navigation` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
+如果服务端已经生成过旧版 `plugins/CraftMaid/config.yml`，新字段不会自动写入旧文件。需要手动补上 `llm.hard_timeout_seconds`、`llm.transient_retry_*`、`maid.skin`、`maid.access`、`maid.follow.*`、`maid.combat.hostile_targets`、`maid.combat.fightback_targets`、`maid.combat.avoid_targets`、`maid.combat.owner_damage_policy`、`maid.combat.self_defense`、`maid.combat.guard_fightback`、`maid.combat.survivability`、`perception`、`conversation.summary.*`、`jobs.navigation` 和 `jobs`，或者备份后删除旧配置让插件重新生成。
 
 ### 2. 生成女仆
 确保已安装 **Citizens** 插件。房主（需拥有 `craftmaid.admin` 权限或 OP）在游戏内输入：
@@ -310,13 +319,16 @@ conversation:
 * 设置 redstone_watch/default
 * 跟随我 / 别跟了
 * 停止工作（停止当前 job、跟随或护卫）
-* 保护我 / 停止护卫 / 守在这里（需要 Sentinel）
+* 解除敌意（清除玩家自卫目标，不改变 Job 或护卫对象）
+* 保护主人 / 停止护卫 / 守在这里（需要 Sentinel）
 * 去钓鱼（优先使用 `fishing_spot/default` 和 `pond/default`；没有 default 且只有一个可用配置时自动使用它）
 * 看住机器（优先使用 `redstone_watch/default`；没有 default 且只有一个可用配置时自动使用它）
 * 收农田（优先使用 `farm/default`；没有 default 且只有一个可用配置时自动使用它）
 * 关闭菜单
 
-“打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.admin` 权限的玩家执行。
+“打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.control` 权限的玩家执行。`craftmaid.admin` 默认只负责插件管理；只有把 `maid.access.admin_can_control` 设为 `true` 时，管理员才自动获得女仆控制权。
+
+权限分为三层：`craftmaid.view` 默认所有玩家可用，只允许打开菜单和查看状态；`craftmaid.control` 默认不授予，用于跟随、护卫、工作、装备和锚点操作；`craftmaid.admin` 默认授予 OP，用于 reload、spawn/despawn 和历史管理。配置中的 `maid.master` 不需要额外权限，始终拥有控制权。默认 `guard_target_policy: master_only` 下，“保护主人”始终以在线的 `maid.master` 为 Sentinel 守护对象，不会把点击菜单的 OP 自动改成守护对象。
 
 anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田收割已经使用 `farm`，并可选使用 `harvest_spot` 指定田边站位；ChunkKeeper 已经使用 `redstone_watch`；箱子整理还只是数据准备。
 
@@ -387,7 +399,7 @@ Job 状态和钓鱼控制：
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
-`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。
+`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误可按 `llm.transient_retry_*` 重试，final 失败只使用本地角色回复，不会重复执行 action。执行 `/craftmaid reload` 时也会取消旧请求并忽略迟到结果。
 
 如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
 
@@ -419,9 +431,9 @@ regions:
       pos2: ...
 ```
 
-护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫，超时或跑远后停战。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
+护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫；插件每秒检查一次，到期、超距、离线或跨世界都会同时删除 Sentinel UUID 目标并结束追击。“解除敌意”可立即清除全部当前玩家自卫目标。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
 
-`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护我”或“守在这里”，让新设置写入 Sentinel trait。
+`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护主人”或“守在这里”，让新设置写入 Sentinel trait。
 
 移除已记录的女仆 NPC：
 ```

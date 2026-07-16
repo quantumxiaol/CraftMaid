@@ -18,10 +18,16 @@ public final class MaidCombatPolicy {
       Map.of(
           "wolves", "wolf",
           "endermen", "enderman",
-          "snowmen", "snow_golem");
+          "snowmen", "snow_golem",
+          "snowman", "snow_golem");
+  private static final Map<String, String> SENTINEL_KEY_ALIASES =
+      Map.of(
+          "witches", "witch",
+          "snow_golems", "snowman",
+          "snow_golem", "snowman");
   private static final Set<EntityType> ABSOLUTE_DENY = Set.of(EntityType.BEE);
   private static final List<String> LEGACY_MANAGED_TARGETS =
-      List.of("monsters", "mobs", "passive_mobs", "bees");
+      List.of("monsters", "mobs", "passive_mobs", "bees", "witches", "snow_golems");
 
   private final List<String> hostileTargetKeys;
   private final List<String> fightbackTargetKeys;
@@ -44,11 +50,11 @@ public final class MaidCombatPolicy {
 
   public static MaidCombatPolicy from(CraftMaidConfig.CombatSettings settings) {
     List<String> hostileTargets =
-        settings == null ? List.of() : normalizeKeys(settings.hostileTargets());
+        settings == null ? List.of() : normalizeSentinelKeys(settings.hostileTargets());
     List<String> fightbackTargets =
-        settings == null ? List.of() : normalizeKeys(settings.fightbackTargets());
+        settings == null ? List.of() : normalizeSentinelKeys(settings.fightbackTargets());
     List<String> avoidTargets =
-        settings == null ? List.of() : normalizeKeys(settings.avoidTargets());
+        settings == null ? List.of() : normalizeSentinelKeys(settings.avoidTargets());
     return new MaidCombatPolicy(
         hostileTargets, fightbackTargets, avoidTargets, parseTypes(fightbackTargets));
   }
@@ -97,6 +103,8 @@ public final class MaidCombatPolicy {
     LinkedHashSet<String> keys = new LinkedHashSet<>(avoidTargetKeys);
     keys.add("creepers");
     keys.add("bees");
+    keys.add("snow_golems");
+    keys.add("snow_golem");
     return List.copyOf(keys);
   }
 
@@ -112,6 +120,15 @@ public final class MaidCombatPolicy {
       keys.add(normalizeKey(rawKey));
     }
     return List.copyOf(new LinkedHashSet<>(keys));
+  }
+
+  private static List<String> normalizeSentinelKeys(List<String> rawKeys) {
+    List<String> normalizedKeys = normalizeKeys(rawKeys);
+    List<String> sentinelKeys = new ArrayList<>();
+    for (String key : normalizedKeys) {
+      sentinelKeys.add(SENTINEL_KEY_ALIASES.getOrDefault(key, key));
+    }
+    return List.copyOf(new LinkedHashSet<>(sentinelKeys));
   }
 
   private static Set<EntityType> parseTypes(List<String> keys) {

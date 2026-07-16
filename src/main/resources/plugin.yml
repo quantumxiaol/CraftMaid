@@ -8,12 +8,16 @@ commands:
     description: "管理 CraftMaid 女仆插件"
     usage: "/<command> [help|spawn|despawn|reload|forget|follow|job|fishing|chunk|harvest|anchor|region]"
     aliases: [maid]
-    permission: craftmaid.admin
-    permission-message: "你没有权限执行此命令。"
   follow:
     description: "控制 CraftMaid 女仆跟随"
     usage: "/<command> <start|stop>"
 permissions:
   craftmaid.admin:
-    description: "允许管理 CraftMaid 配置和 NPC"
+    description: "允许重载配置、生成/删除 NPC 和管理历史"
     default: op
+  craftmaid.control:
+    description: "允许控制女仆跟随、护卫、工作、装备和锚点"
+    default: false
+  craftmaid.view:
+    description: "允许打开女仆菜单并查看状态"
+    default: true

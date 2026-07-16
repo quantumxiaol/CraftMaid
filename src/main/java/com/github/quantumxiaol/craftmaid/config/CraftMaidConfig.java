@@ -84,7 +84,10 @@ public record CraftMaidConfig(
             getConfigString(plugin, "llm.model_name", "gpt-3.5-turbo"),
             clamp(plugin.getConfig().getDouble("llm.temperature", 0.7), 0.0, 2.0),
             Math.max(1, plugin.getConfig().getInt("llm.max_tokens", 320)),
-            Math.max(1, plugin.getConfig().getInt("llm.timeout_seconds", 30)));
+            Math.max(1, plugin.getConfig().getInt("llm.timeout_seconds", 30)),
+            Math.max(1, plugin.getConfig().getInt("llm.hard_timeout_seconds", 40)),
+            Math.max(0, plugin.getConfig().getInt("llm.transient_retry_count", 1)),
+            Math.max(0, plugin.getConfig().getInt("llm.transient_retry_delay_millis", 500)));
 
     MaidSettings maid =
         new MaidSettings(
@@ -92,6 +95,10 @@ public record CraftMaidConfig(
             getConfigString(plugin, "maid.master", "PlayerName"),
             getConfigString(plugin, "maid.language", "中文"),
             getConfigString(plugin, "maid.skin", "master"),
+            new AccessSettings(
+                plugin.getConfig().getBoolean("maid.access.admin_can_control", false),
+                normalizeGuardTargetPolicy(
+                    getConfigString(plugin, "maid.access.guard_target_policy", "master_only"))),
             new FollowSettings(
                 clamp(plugin.getConfig().getDouble("maid.follow.speed", 1.75), 0.1, 3.0),
                 Math.max(1, plugin.getConfig().getInt("maid.follow.update_ticks", 10)),
@@ -341,21 +348,33 @@ public record CraftMaidConfig(
     };
   }
 
+  private static String normalizeGuardTargetPolicy(String value) {
+    String normalized =
+        value == null ? "master_only" : value.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+    return "current_player".equals(normalized) ? normalized : "master_only";
+  }
+
   public record LlmSettings(
       String baseUrl,
       String apiKey,
       String modelName,
       double temperature,
       int maxTokens,
-      int timeoutSeconds) {}
+      int timeoutSeconds,
+      int hardTimeoutSeconds,
+      int transientRetryCount,
+      int transientRetryDelayMillis) {}
 
   public record MaidSettings(
       String name,
       String master,
       String language,
       String skin,
+      AccessSettings access,
       FollowSettings follow,
       CombatSettings combat) {}
+
+  public record AccessSettings(boolean adminCanControl, String guardTargetPolicy) {}
 
   public record FollowSettings(
       double speed,

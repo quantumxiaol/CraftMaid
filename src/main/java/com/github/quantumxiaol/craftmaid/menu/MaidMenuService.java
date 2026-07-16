@@ -32,6 +32,10 @@ public final class MaidMenuService implements Listener {
   }
 
   public void openFor(Player player) {
+    if (!plugin.canViewMaid(player)) {
+      player.sendMessage(Component.text("你没有查看女仆菜单的权限。", NamedTextColor.RED));
+      return;
+    }
     MaidMenuHolder holder = new MaidMenuHolder();
     Inventory inventory =
         Bukkit.createInventory(holder, MENU_SIZE, Component.text(plugin.getMaidName() + "的菜单"));
@@ -106,6 +110,14 @@ public final class MaidMenuService implements Listener {
     setActionItem(
         holder,
         inventory,
+        22,
+        MaidMenuAction.CEASEFIRE,
+        Material.WHITE_BANNER,
+        "解除敌意",
+        "清除女仆对玩家的短时自卫目标，不改变工作或护卫对象。");
+    setActionItem(
+        holder,
+        inventory,
         27,
         MaidMenuAction.SET_FISHING_SPOT,
         Material.WATER_BUCKET,
@@ -173,8 +185,8 @@ public final class MaidMenuService implements Listener {
         23,
         MaidMenuAction.GUARD_START,
         Material.IRON_SWORD,
-        "保护我",
-        "需要 Sentinel。");
+        "保护主人",
+        "需要 Sentinel；默认保护 maid.master。");
     setActionItem(
         holder,
         inventory,
@@ -317,6 +329,7 @@ public final class MaidMenuService implements Listener {
       case FOLLOW_START -> startFollowing(player);
       case FOLLOW_STOP -> stopFollowing(player);
       case JOB_STOP -> stopActiveJob(player);
+      case CEASEFIRE -> clearHostility(player);
       case GUARD_START -> startGuarding(player);
       case GUARD_STOP -> stopGuarding(player);
       case GUARD_HERE -> startGuardingHere(player);
@@ -567,14 +580,32 @@ public final class MaidMenuService implements Listener {
             result.message(), result.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
   }
 
+  private void clearHostility(Player player) {
+    if (!plugin.canClearMaidHostility(player)) {
+      player.sendMessage(Component.text("只有主人、管理员或授权玩家可以解除敌意。", NamedTextColor.RED));
+      return;
+    }
+    int cleared = plugin.getMaidSelfDefenseService().forgiveAll();
+    player.closeInventory();
+    player.sendMessage(
+        Component.text(
+            cleared > 0 ? plugin.getMaidName() + " 已经停手，不再追击玩家。" : "当前没有玩家自卫目标。",
+            cleared > 0 ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
+  }
+
   private void startGuarding(Player player) {
     if (!ensureControlAllowed(player)
         || !ensureNpcAvailable(player)
         || !ensureSentinelAvailable(player)) {
       return;
     }
+    Player guardTarget = plugin.resolveGuardTarget(player);
+    if (guardTarget == null || !guardTarget.isOnline()) {
+      player.sendMessage(Component.text("主人当前不在线，无法开始保护主人。", NamedTextColor.YELLOW));
+      return;
+    }
     plugin.getJobService().stopJobsForGuarding("当前工作停止：玩家开始护卫。");
-    boolean started = plugin.getMaidNpcService().startGuarding(player);
+    boolean started = plugin.getMaidNpcService().startGuarding(guardTarget);
     if (!started) {
       player.sendMessage(Component.text("启动护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
       return;
@@ -648,11 +679,10 @@ public final class MaidMenuService implements Listener {
   }
 
   private boolean ensureControlAllowed(Player player) {
-    if (player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName())) {
+    if (plugin.canControlMaid(player)) {
       return true;
     }
-    player.sendMessage(Component.text("只有主人或管理员可以控制女仆。", NamedTextColor.RED));
+    player.sendMessage(Component.text("只有主人或授权玩家可以控制女仆。", NamedTextColor.RED));
     return false;
   }
 

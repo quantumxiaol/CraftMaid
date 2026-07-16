@@ -6,6 +6,7 @@ import com.github.quantumxiaol.craftmaid.combat.MaidCombatFightbackListener;
 import com.github.quantumxiaol.craftmaid.combat.MaidCombatPolicy;
 import com.github.quantumxiaol.craftmaid.combat.MaidDamagePolicyListener;
 import com.github.quantumxiaol.craftmaid.combat.MaidLootListener;
+import com.github.quantumxiaol.craftmaid.combat.MaidSelfDefenseService;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
@@ -18,7 +19,9 @@ import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcServices;
 import com.github.quantumxiaol.craftmaid.perception.MaidPerceptionService;
+import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class CraftMaid extends JavaPlugin {
@@ -34,6 +37,7 @@ public final class CraftMaid extends JavaPlugin {
   private MaidMenuService maidMenuService;
   private MaidCombatPolicy combatPolicy;
   private MaidCombatBuffService combatBuffService;
+  private MaidSelfDefenseService selfDefenseService;
   private MaidPerceptionService perceptionService;
 
   @Override
@@ -55,6 +59,8 @@ public final class CraftMaid extends JavaPlugin {
       getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
     }
     loadConfiguration();
+    selfDefenseService = new MaidSelfDefenseService(this);
+    selfDefenseService.start();
 
     chatListener = new ChatListener(this, llmClient);
     getServer().getPluginManager().registerEvents(chatListener, this);
@@ -87,6 +93,12 @@ public final class CraftMaid extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    if (chatListener != null) {
+      chatListener.shutdown();
+    }
+    if (selfDefenseService != null) {
+      selfDefenseService.shutdown();
+    }
     if (maidNpcService != null) {
       maidNpcService.stopFollowing();
     }
@@ -120,7 +132,10 @@ public final class CraftMaid extends JavaPlugin {
             llm.modelName(),
             llm.temperature(),
             llm.maxTokens(),
-            llm.timeoutSeconds());
+            llm.timeoutSeconds(),
+            llm.hardTimeoutSeconds(),
+            llm.transientRetryCount(),
+            llm.transientRetryDelayMillis());
     if (llm.baseUrl().contains("api.openai.com") && llm.apiKey().isBlank()) {
       getLogger().warning("当前 LLM 地址是 OpenAI API，但未配置 llm.api_key。");
     }
@@ -140,6 +155,7 @@ public final class CraftMaid extends JavaPlugin {
   }
 
   public void reloadPlugin() {
+    clearMaidSelfDefenseTargets();
     loadConfiguration();
   }
 
@@ -153,6 +169,43 @@ public final class CraftMaid extends JavaPlugin {
 
   public String getMaidSkin() {
     return config.maid().skin();
+  }
+
+  public CraftMaidConfig.AccessSettings getMaidAccessSettings() {
+    return config.maid().access();
+  }
+
+  public boolean isMaster(Player player) {
+    return player != null && player.getName().equalsIgnoreCase(getMasterName());
+  }
+
+  public boolean canViewMaid(Player player) {
+    return player != null
+        && (isMaster(player)
+            || player.hasPermission("craftmaid.view")
+            || player.hasPermission("craftmaid.control")
+            || player.hasPermission("craftmaid.admin"));
+  }
+
+  public boolean canControlMaid(Player player) {
+    if (player == null) {
+      return false;
+    }
+    if (isMaster(player) || player.hasPermission("craftmaid.control")) {
+      return true;
+    }
+    return getMaidAccessSettings().adminCanControl() && player.hasPermission("craftmaid.admin");
+  }
+
+  public boolean canClearMaidHostility(Player player) {
+    return player != null && (canControlMaid(player) || player.hasPermission("craftmaid.admin"));
+  }
+
+  public Player resolveGuardTarget(Player controller) {
+    if ("current_player".equals(getMaidAccessSettings().guardTargetPolicy())) {
+      return controller;
+    }
+    return Bukkit.getPlayerExact(getMasterName());
   }
 
   public boolean isMaidEnemyDropsEnabled() {
@@ -189,6 +242,16 @@ public final class CraftMaid extends JavaPlugin {
 
   public MaidCombatBuffService getMaidCombatBuffService() {
     return combatBuffService;
+  }
+
+  public MaidSelfDefenseService getMaidSelfDefenseService() {
+    return selfDefenseService;
+  }
+
+  public void clearMaidSelfDefenseTargets() {
+    if (selfDefenseService != null) {
+      selfDefenseService.forgiveAll();
+    }
   }
 
   public String getSystemPrompt() {

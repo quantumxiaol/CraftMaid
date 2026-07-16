@@ -21,7 +21,7 @@ public final class MaidActionExecutor {
       return new MaidActionExecutionResult(false, List.of());
     }
     if (!allReadOnly(actions) && !canControl(player)) {
-      return new MaidActionExecutionResult(true, List.of("ACTION_DENIED: 只有主人或管理员可以让女仆执行工作。"));
+      return new MaidActionExecutionResult(true, List.of("ACTION_DENIED: 只有主人或授权玩家可以让女仆执行工作。"));
     }
 
     String validationError = validate(actions);
@@ -116,8 +116,12 @@ public final class MaidActionExecutor {
     if (!plugin.getMaidNpcService().isGuardAvailable()) {
       return JobActionResult.failure("未安装或未启用 Sentinel，无法护卫主人。");
     }
+    Player guardTarget = plugin.resolveGuardTarget(player);
+    if (guardTarget == null || !guardTarget.isOnline()) {
+      return JobActionResult.failure("主人当前不在线，无法开始保护主人。");
+    }
     plugin.getJobService().stopJobsForGuarding("主人让我护卫，我先停下手头的事。");
-    boolean started = plugin.getMaidNpcService().startGuarding(player);
+    boolean started = plugin.getMaidNpcService().startGuarding(guardTarget);
     if (!started) {
       return JobActionResult.failure("启动护卫失败，请检查 Sentinel 是否正常加载。");
     }
@@ -181,7 +185,6 @@ public final class MaidActionExecutor {
     if (!plugin.getIntentSettings().masterOnly()) {
       return true;
     }
-    return player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName());
+    return plugin.canControlMaid(player);
   }
 }

@@ -7,8 +7,6 @@ import java.util.Map;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -17,14 +15,11 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.projectiles.ProjectileSource;
-import org.bukkit.scheduler.BukkitTask;
 
 public final class MaidDamagePolicyListener implements Listener {
   private static final long OWNER_ATTACK_MESSAGE_COOLDOWN_MILLIS = 3000L;
 
   private final CraftMaid plugin;
-  private final Map<UUID, Long> selfDefenseTargets = new HashMap<>();
-  private final Map<UUID, BukkitTask> selfDefenseCleanupTasks = new HashMap<>();
   private final Map<UUID, Long> nextOwnerAttackMessageAt = new HashMap<>();
 
   public MaidDamagePolicyListener(CraftMaid plugin) {
@@ -57,13 +52,13 @@ public final class MaidDamagePolicyListener implements Listener {
       return;
     }
 
-    registerSelfDefenseTarget(attacker, settings);
+    plugin.getMaidSelfDefenseService().startDefense(attacker);
   }
 
   private void handleMasterDamagedMaid(EntityDamageByEntityEvent event, Player master) {
     String policy = plugin.getMaidCombatSettings().ownerDamagePolicy();
     if (!"allow_and_retaliate".equals(policy)) {
-      plugin.getMaidNpcService().forgiveCombatTarget(master);
+      plugin.getMaidSelfDefenseService().forgive(master);
     }
 
     if ("cancel".equals(policy)) {
@@ -79,92 +74,21 @@ public final class MaidDamagePolicyListener implements Listener {
 
     CraftMaidConfig.SelfDefenseSettings settings = plugin.getMaidCombatSettings().selfDefense();
     if (settings != null && settings.enabled() && settings.targetMaster()) {
-      registerSelfDefenseTarget(master, settings);
+      plugin.getMaidSelfDefenseService().startDefense(master);
     }
   }
 
   private void handlePlayerDamagedByMaid(EntityDamageByEntityEvent event, Player victim) {
     if (isMaster(victim)) {
       event.setCancelled(true);
-      plugin.getMaidNpcService().forgiveCombatTarget(victim);
+      plugin.getMaidSelfDefenseService().forgive(victim);
       return;
     }
 
-    if (!isActiveSelfDefenseTarget(victim)) {
+    if (!plugin.getMaidSelfDefenseService().isActiveTarget(victim)) {
       event.setCancelled(true);
-      plugin.getMaidNpcService().forgiveCombatTarget(victim);
+      plugin.getMaidSelfDefenseService().forgive(victim);
     }
-  }
-
-  private void registerSelfDefenseTarget(
-      Player attacker, CraftMaidConfig.SelfDefenseSettings settings) {
-    long expiresAt = System.currentTimeMillis() + settings.durationSeconds() * 1000L;
-    selfDefenseTargets.put(attacker.getUniqueId(), expiresAt);
-
-    BukkitTask existingTask = selfDefenseCleanupTasks.remove(attacker.getUniqueId());
-    if (existingTask != null) {
-      existingTask.cancel();
-    }
-    BukkitTask cleanupTask =
-        Bukkit.getScheduler()
-            .runTaskLater(
-                plugin,
-                () -> {
-                  selfDefenseTargets.remove(attacker.getUniqueId());
-                  selfDefenseCleanupTasks.remove(attacker.getUniqueId());
-                },
-                settings.durationSeconds() * 20L);
-    selfDefenseCleanupTasks.put(attacker.getUniqueId(), cleanupTask);
-
-    plugin.getMaidNpcService().markSelfDefenseTarget(attacker, settings.durationSeconds());
-  }
-
-  private boolean isActiveSelfDefenseTarget(Player player) {
-    Long expiresAt = selfDefenseTargets.get(player.getUniqueId());
-    if (expiresAt == null) {
-      return false;
-    }
-
-    long now = System.currentTimeMillis();
-    if (now >= expiresAt) {
-      clearSelfDefenseTarget(player);
-      return false;
-    }
-
-    CraftMaidConfig.SelfDefenseSettings settings = plugin.getMaidCombatSettings().selfDefense();
-    if (settings == null || !settings.forgiveWhenAttackerFar()) {
-      return true;
-    }
-
-    Location maidLocation =
-        plugin.getMaidNpcService().getMaidLivingEntity() == null
-            ? null
-            : plugin.getMaidNpcService().getMaidLivingEntity().getLocation();
-    Location playerLocation = player.getLocation();
-    if (maidLocation == null
-        || maidLocation.getWorld() == null
-        || playerLocation.getWorld() == null
-        || !maidLocation.getWorld().equals(playerLocation.getWorld())) {
-      clearSelfDefenseTarget(player);
-      return false;
-    }
-
-    double maxDistance = settings.maxChaseDistance();
-    if (maidLocation.distanceSquared(playerLocation) > maxDistance * maxDistance) {
-      clearSelfDefenseTarget(player);
-      return false;
-    }
-
-    return true;
-  }
-
-  private void clearSelfDefenseTarget(Player player) {
-    selfDefenseTargets.remove(player.getUniqueId());
-    BukkitTask task = selfDefenseCleanupTasks.remove(player.getUniqueId());
-    if (task != null) {
-      task.cancel();
-    }
-    plugin.getMaidNpcService().forgiveCombatTarget(player);
   }
 
   private void recordOwnerAttack(Player master) {

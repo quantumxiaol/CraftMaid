@@ -37,7 +37,7 @@ public final class FollowCommand implements TabExecutor {
     }
 
     if (!canControl(player)) {
-      sender.sendMessage(Component.text("只有主人或管理员可以控制女仆。", NamedTextColor.RED));
+      sender.sendMessage(Component.text("只有主人或授权玩家可以控制女仆。", NamedTextColor.RED));
       return true;
     }
 
@@ -74,8 +74,7 @@ public final class FollowCommand implements TabExecutor {
   }
 
   private boolean canControl(Player player) {
-    return player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName());
+    return plugin.canControlMaid(player);
   }
 
   private void startFollowing(Player player) {

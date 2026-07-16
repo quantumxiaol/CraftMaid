@@ -89,9 +89,9 @@ public interface MaidNpcService {
 
   boolean markGuardFightbackTarget(Entity entity);
 
-  boolean markSelfDefenseTarget(Player player, int durationSeconds);
+  boolean addSelfDefenseTarget(Player player);
 
-  void forgiveCombatTarget(Player player);
+  void removeSelfDefenseTarget(java.util.UUID playerId, String playerName);
 
   boolean stopGuarding();
 }

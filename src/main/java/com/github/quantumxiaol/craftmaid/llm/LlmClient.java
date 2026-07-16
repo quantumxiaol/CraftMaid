@@ -7,15 +7,22 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import java.io.EOFException;
+import java.net.ConnectException;
+import java.net.SocketException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class LlmClient {
@@ -49,6 +56,9 @@ public class LlmClient {
   private final double temperature;
   private final int maxTokens;
   private final Duration requestTimeout;
+  private final int hardTimeoutSeconds;
+  private final int transientRetryCount;
+  private final int transientRetryDelayMillis;
   private volatile boolean responseFormatUnsupported;
 
   public LlmClient(
@@ -57,7 +67,10 @@ public class LlmClient {
       String modelName,
       double temperature,
       int maxTokens,
-      int timeoutSeconds) {
+      int timeoutSeconds,
+      int hardTimeoutSeconds,
+      int transientRetryCount,
+      int transientRetryDelayMillis) {
     this.httpClient =
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(timeoutSeconds)).build();
     this.apiUrl = normalizeApiUrl(apiUrl);
@@ -66,6 +79,9 @@ public class LlmClient {
     this.temperature = temperature;
     this.maxTokens = maxTokens;
     this.requestTimeout = Duration.ofSeconds(timeoutSeconds);
+    this.hardTimeoutSeconds = Math.max(1, hardTimeoutSeconds);
+    this.transientRetryCount = Math.max(0, transientRetryCount);
+    this.transientRetryDelayMillis = Math.max(0, transientRetryDelayMillis);
   }
 
   public CompletableFuture<String> askAiAsync(String systemPrompt, String userPrompt) {
@@ -253,16 +269,123 @@ public class LlmClient {
 
     HttpRequest request = requestBuilder.build();
 
-    return httpClient
-        .sendAsync(request, HttpResponse.BodyHandlers.ofString())
-        .thenApply(
-            response -> {
-              try {
-                return parseResponse(response, mode);
-              } catch (JsonParseException | IllegalStateException | NullPointerException ex) {
-                throw new RuntimeException("LLM 返回格式无法解析: " + summarize(response.body()), ex);
+    String requestId = UUID.randomUUID().toString().substring(0, 8);
+    long startedAtNanos = System.nanoTime();
+    LOGGER.fine(
+        "LLM request started request_id="
+            + requestId
+            + " mode="
+            + mode
+            + " model="
+            + modelName
+            + " hard_timeout="
+            + hardTimeoutSeconds
+            + "s");
+
+    CompletableFuture<String> requestFuture =
+        sendWithTransientRetry(request, mode, requestId, 1, transientRetryCount);
+    return requestFuture
+        .orTimeout(hardTimeoutSeconds, TimeUnit.SECONDS)
+        .whenComplete(
+            (ignored, throwable) -> {
+              if (throwable == null || looksLikeUnsupportedResponseFormat(throwable)) {
+                return;
               }
+              long elapsedMillis =
+                  TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+              LOGGER.warning(
+                  "LLM request failed request_id="
+                      + requestId
+                      + " mode="
+                      + mode
+                      + " elapsed_ms="
+                      + elapsedMillis
+                      + " error="
+                      + rootMessage(throwable));
             });
+  }
+
+  private CompletableFuture<String> sendWithTransientRetry(
+      HttpRequest request, String mode, String requestId, int attempt, int retriesRemaining) {
+    CompletableFuture<String> attemptFuture =
+        httpClient
+            .sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenApply(
+                response -> {
+                  try {
+                    return parseResponse(response, mode);
+                  } catch (JsonParseException | IllegalStateException | NullPointerException ex) {
+                    throw new RuntimeException("LLM 返回格式无法解析: " + summarize(response.body()), ex);
+                  }
+                });
+
+    return attemptFuture
+        .handle(
+            (content, throwable) -> {
+              if (throwable == null) {
+                return CompletableFuture.completedFuture(content);
+              }
+
+              Throwable cause = unwrapCompletionException(throwable);
+              if (retriesRemaining <= 0 || !isRetryableMode(mode) || !isTransientFailure(cause)) {
+                return CompletableFuture.<String>failedFuture(cause);
+              }
+
+              LOGGER.warning(
+                  "LLM transient failure request_id="
+                      + requestId
+                      + " mode="
+                      + mode
+                      + " attempt="
+                      + attempt
+                      + " retrying_in_ms="
+                      + transientRetryDelayMillis
+                      + " error="
+                      + rootMessage(cause));
+              return CompletableFuture.supplyAsync(
+                      () -> null,
+                      CompletableFuture.delayedExecutor(
+                          transientRetryDelayMillis, TimeUnit.MILLISECONDS))
+                  .thenCompose(
+                      ignored ->
+                          sendWithTransientRetry(
+                              request, mode, requestId, attempt + 1, retriesRemaining - 1));
+            })
+        .thenCompose(future -> future);
+  }
+
+  private boolean isRetryableMode(String mode) {
+    return mode == null
+        || mode.equals("chat")
+        || mode.equals("plan")
+        || mode.equals("memory")
+        || mode.startsWith("plan-");
+  }
+
+  private boolean isTransientFailure(Throwable throwable) {
+    Throwable cursor = throwable;
+    while (cursor != null) {
+      if (cursor instanceof SocketException
+          || cursor instanceof ConnectException
+          || cursor instanceof HttpTimeoutException
+          || cursor instanceof EOFException) {
+        return true;
+      }
+      if (cursor instanceof LlmApiException apiException) {
+        int statusCode = apiException.statusCode();
+        return statusCode == 502 || statusCode == 503 || statusCode == 504;
+      }
+      cursor = cursor.getCause();
+    }
+    return false;
+  }
+
+  private Throwable unwrapCompletionException(Throwable throwable) {
+    Throwable cursor = throwable;
+    while ((cursor instanceof CompletionException) && cursor.getCause() != null) {
+      cursor = cursor.getCause();
+    }
+    return cursor;
   }
 
   private String parseResponse(HttpResponse<String> response, String mode) {
@@ -270,14 +393,14 @@ public class LlmClient {
     int statusCode = response.statusCode();
     if (statusCode < 200 || statusCode >= 300) {
       throw new LlmApiException(
-          "LLM HTTP " + statusCode + ": " + summarize(responseBody), responseBody);
+          "LLM HTTP " + statusCode + ": " + summarize(responseBody), responseBody, statusCode);
     }
 
     JsonObject responseJson = JsonParser.parseString(responseBody).getAsJsonObject();
     if (responseJson.has("error")) {
       JsonObject error = responseJson.getAsJsonObject("error");
       String message = error.has("message") ? error.get("message").getAsString() : error.toString();
-      throw new LlmApiException(message, responseBody);
+      throw new LlmApiException(message, responseBody, statusCode);
     }
 
     JsonArray choices = responseJson.getAsJsonArray("choices");
@@ -403,14 +526,20 @@ public class LlmClient {
 
   private static final class LlmApiException extends RuntimeException {
     private final String detectionText;
+    private final int statusCode;
 
-    private LlmApiException(String message, String detectionText) {
+    private LlmApiException(String message, String detectionText, int statusCode) {
       super(message);
       this.detectionText = detectionText == null ? "" : detectionText;
+      this.statusCode = statusCode;
     }
 
     private String detectionText() {
       return detectionText;
+    }
+
+    private int statusCode() {
+      return statusCode;
     }
   }
 }

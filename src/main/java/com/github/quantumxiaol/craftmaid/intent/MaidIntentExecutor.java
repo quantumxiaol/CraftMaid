@@ -15,7 +15,7 @@ public final class MaidIntentExecutor {
   public MaidIntentResult execute(Player player, MaidIntent intent) {
     IntentSettings settings = plugin.getIntentSettings();
     if (settings.masterOnly() && !canControl(player)) {
-      return MaidIntentResult.consumed(false, maidPrefix() + "对不起，只有主人或管理员可以让我去工作。");
+      return MaidIntentResult.consumed(false, maidPrefix() + "对不起，只有主人或授权玩家可以让我去工作。");
     }
 
     JobActionResult result =
@@ -34,8 +34,7 @@ public final class MaidIntentExecutor {
   }
 
   private boolean canControl(Player player) {
-    return player.hasPermission("craftmaid.admin")
-        || player.getName().equalsIgnoreCase(plugin.getMasterName());
+    return plugin.canControlMaid(player);
   }
 
   private String successMessage(Player player, MaidIntent intent) {
