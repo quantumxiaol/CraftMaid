@@ -1,19 +1,19 @@
 name: CraftMaid
-version: '1.0'
+version: '${project.version}'
 main: com.github.quantumxiaol.craftmaid.CraftMaid
 api-version: '26.1.2'
 softdepend: [Citizens, Sentinel, Denizen]
 commands:
   craftmaid:
     description: "管理 CraftMaid 女仆插件"
-    usage: "/<command> [help|spawn|despawn|reload|forget|follow|job|fishing|chunk|harvest|anchor|region]"
+    usage: "/<command> [help|version|spawn|hide|show|refresh|remove|reload|forget|follow|job|fishing|chunk|harvest|anchor|region]"
     aliases: [maid]
   follow:
     description: "控制 CraftMaid 女仆跟随"
     usage: "/<command> <start|stop>"
 permissions:
   craftmaid.admin:
-    description: "允许重载配置、生成/删除 NPC 和管理历史"
+    description: "允许重载配置、生成/隐藏/刷新/删除 NPC 和管理历史"
     default: op
   craftmaid.control:
     description: "允许控制女仆跟随、护卫、工作、装备和锚点"

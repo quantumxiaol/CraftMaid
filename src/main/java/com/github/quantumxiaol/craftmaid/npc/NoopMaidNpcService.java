@@ -45,6 +45,36 @@ final class NoopMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public boolean showStored() {
+    return false;
+  }
+
+  @Override
+  public boolean removeStored() {
+    return false;
+  }
+
+  @Override
+  public boolean reconcileExistingNpc(boolean respawnEntity) {
+    return false;
+  }
+
+  @Override
+  public int getStoredNpcId() {
+    return -1;
+  }
+
+  @Override
+  public boolean hasStoredNpc() {
+    return false;
+  }
+
+  @Override
+  public boolean isStoredNpcSpawned() {
+    return false;
+  }
+
+  @Override
   public boolean applyConfiguredSkin(Player fallbackPlayer) {
     return false;
   }

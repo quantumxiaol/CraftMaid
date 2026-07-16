@@ -23,10 +23,10 @@ import org.jetbrains.annotations.Nullable;
 public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
       List.of(
-          "help", "spawn", "despawn", "reload", "forget", "follow", "anchor", "region", "job",
-          "fishing", "chunk", "harvest");
+          "help", "version", "spawn", "despawn", "hide", "show", "refresh", "remove", "reload",
+          "forget", "follow", "anchor", "region", "job", "fishing", "chunk", "harvest");
   private static final List<String> ADMIN_SUBCOMMANDS =
-      List.of("reload", "spawn", "despawn", "forget");
+      List.of("reload", "spawn", "despawn", "hide", "show", "refresh", "remove", "forget");
   private static final List<String> CONTROL_SUBCOMMANDS =
       List.of("follow", "anchor", "region", "job", "fishing", "chunk", "harvest");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
@@ -83,16 +83,37 @@ public class CraftMaidCommand implements TabExecutor {
 
     switch (subcommand) {
       case "reload" -> {
-        plugin.reloadPlugin();
-        sender.sendMessage(Component.text("CraftMaid 配置已重新加载。", NamedTextColor.GREEN));
+        boolean reconciled = plugin.reloadPlugin();
+        sender.sendMessage(
+            Component.text(
+                reconciled
+                    ? "CraftMaid 配置已重新加载，现存 NPC 已原地迁移。"
+                    : "配置已重新加载，但现存 NPC 迁移未完全成功，请检查日志或执行 /maid refresh。",
+                reconciled ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
+        return true;
+      }
+      case "version" -> {
+        sendVersion(sender);
         return true;
       }
       case "spawn" -> {
         spawnMaid(sender);
         return true;
       }
-      case "despawn" -> {
-        despawnMaid(sender);
+      case "despawn", "hide" -> {
+        hideMaid(sender);
+        return true;
+      }
+      case "show" -> {
+        showMaid(sender);
+        return true;
+      }
+      case "refresh" -> {
+        refreshMaid(sender);
+        return true;
+      }
+      case "remove" -> {
+        removeMaid(sender, args);
         return true;
       }
       case "forget" -> {
@@ -147,6 +168,7 @@ public class CraftMaidCommand implements TabExecutor {
           .filter(
               subcommand ->
                   subcommand.equals("help")
+                      || subcommand.equals("version")
                       || (ADMIN_SUBCOMMANDS.contains(subcommand)
                           && sender.hasPermission("craftmaid.admin"))
                       || (CONTROL_SUBCOMMANDS.contains(subcommand) && canControl(sender)))
@@ -157,6 +179,12 @@ public class CraftMaidCommand implements TabExecutor {
     if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
       String prefix = args[1].toLowerCase(Locale.ROOT);
       return FOLLOW_ACTIONS.stream().filter(action -> action.startsWith(prefix)).toList();
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("remove")) {
+      return "confirm".startsWith(args[1].toLowerCase(Locale.ROOT))
+          ? List.of("confirm")
+          : Collections.emptyList();
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("job")) {
@@ -286,25 +314,93 @@ public class CraftMaidCommand implements TabExecutor {
       return;
     }
 
+    plugin.getJobService().stopActiveJobForExternalControl("女仆被管理员重新定位，当前 job 已停止。");
     String maidName = plugin.getMaidName();
-    maidNpcService.spawnAt(player, maidName);
+    if (!maidNpcService.spawnAt(player, maidName)) {
+      sender.sendMessage(Component.text("生成或移动女仆失败，请检查 Citizens 日志。", NamedTextColor.RED));
+      return;
+    }
 
     sender.sendMessage(Component.text("已在你的位置召唤女仆 " + maidName + "。", NamedTextColor.GREEN));
   }
 
-  private void despawnMaid(CommandSender sender) {
+  private void hideMaid(CommandSender sender) {
     if (!maidNpcService.isAvailable()) {
       sender.sendMessage(Component.text("未安装或未启用 Citizens，无法管理实体女仆。", NamedTextColor.RED));
       return;
     }
 
-    boolean removed = maidNpcService.despawnStored();
-    if (!removed) {
+    plugin.getJobService().stopActiveJobForExternalControl("女仆已隐藏，当前 job 已停止。");
+    boolean hidden = maidNpcService.despawnStored();
+    if (!hidden) {
       sender.sendMessage(Component.text("当前没有已记录的女仆 NPC。", NamedTextColor.YELLOW));
       return;
     }
 
-    sender.sendMessage(Component.text("已移除女仆 NPC。", NamedTextColor.GREEN));
+    sender.sendMessage(
+        Component.text("已隐藏女仆 NPC，保留 ID、背包、装备和 Citizens traits。", NamedTextColor.GREEN));
+  }
+
+  private void showMaid(CommandSender sender) {
+    if (!maidNpcService.isAvailable()) {
+      sender.sendMessage(Component.text("未安装或未启用 Citizens，无法管理实体女仆。", NamedTextColor.RED));
+      return;
+    }
+    if (!maidNpcService.showStored()) {
+      sender.sendMessage(Component.text("没有可显示的女仆 NPC，或原位置已不可用。", NamedTextColor.YELLOW));
+      return;
+    }
+    sender.sendMessage(
+        Component.text(
+            "已在原位置显示女仆 NPC，当前 ID=" + maidNpcService.getStoredNpcId() + "。", NamedTextColor.GREEN));
+  }
+
+  private void refreshMaid(CommandSender sender) {
+    if (!maidNpcService.isAvailable() || !maidNpcService.hasStoredNpc()) {
+      sender.sendMessage(Component.text("当前没有已记录的女仆 NPC。", NamedTextColor.YELLOW));
+      return;
+    }
+    plugin.getJobService().stopActiveJobForExternalControl("女仆状态刷新，当前 job 已停止。");
+    boolean refreshed = maidNpcService.reconcileExistingNpc(true);
+    sender.sendMessage(
+        Component.text(
+            refreshed ? "已原地刷新女仆 NPC，ID、背包和装备保持不变。" : "刷新未完全成功，请检查 Citizens/Sentinel 日志。",
+            refreshed ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
+  }
+
+  private void removeMaid(CommandSender sender, String[] args) {
+    if (args.length < 2 || !args[1].equalsIgnoreCase("confirm")) {
+      sender.sendMessage(
+          Component.text(
+              "此操作会永久删除 NPC、背包、装备和 Citizens traits；确认请执行 /maid remove confirm。",
+              NamedTextColor.RED));
+      return;
+    }
+    if (!maidNpcService.isAvailable()) {
+      sender.sendMessage(Component.text("未安装或未启用 Citizens，无法管理实体女仆。", NamedTextColor.RED));
+      return;
+    }
+    plugin.getJobService().stopActiveJobForExternalControl("女仆被永久删除，当前 job 已停止。");
+    if (!maidNpcService.removeStored()) {
+      sender.sendMessage(Component.text("当前没有已记录的女仆 NPC。", NamedTextColor.YELLOW));
+      return;
+    }
+    sender.sendMessage(Component.text("已永久删除女仆 NPC 及其 Citizens 数据。", NamedTextColor.GREEN));
+  }
+
+  private void sendVersion(CommandSender sender) {
+    sender.sendMessage(
+        Component.text(
+            "CraftMaid " + plugin.getPluginMeta().getVersion(), NamedTextColor.LIGHT_PURPLE));
+    sender.sendMessage(
+        Component.text(
+            "NPC ID="
+                + maidNpcService.getStoredNpcId()
+                + " found="
+                + maidNpcService.hasStoredNpc()
+                + " spawned="
+                + maidNpcService.isStoredNpcSpawned(),
+            NamedTextColor.GRAY));
   }
 
   private void forgetHistory(CommandSender sender, String[] args) {
@@ -665,14 +761,26 @@ public class CraftMaidCommand implements TabExecutor {
   private void sendHelp(CommandSender sender, String label) {
     sender.sendMessage(Component.text("CraftMaid 命令：", NamedTextColor.LIGHT_PURPLE));
     sender.sendMessage(
+        Component.text("/" + label + " version", NamedTextColor.YELLOW)
+            .append(Component.text(" - 查看插件版本和已记录 NPC 状态", NamedTextColor.GRAY)));
+    sender.sendMessage(
         Component.text("/" + label + " spawn", NamedTextColor.YELLOW)
             .append(Component.text(" - 在当前位置生成或移动女仆 NPC", NamedTextColor.GRAY)));
     sender.sendMessage(
-        Component.text("/" + label + " despawn", NamedTextColor.YELLOW)
-            .append(Component.text(" - 移除已记录的女仆 NPC", NamedTextColor.GRAY)));
+        Component.text("/" + label + " hide|despawn", NamedTextColor.YELLOW)
+            .append(Component.text(" - 暂时隐藏女仆，保留 ID、背包和装备", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " show", NamedTextColor.YELLOW)
+            .append(Component.text(" - 在原位置显示同一个女仆 NPC", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " refresh", NamedTextColor.YELLOW)
+            .append(Component.text(" - 原地迁移并刷新现存 NPC 状态", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " remove confirm", NamedTextColor.RED)
+            .append(Component.text(" - 永久删除 NPC 及其 Citizens 数据", NamedTextColor.GRAY)));
     sender.sendMessage(
         Component.text("/" + label + " reload", NamedTextColor.YELLOW)
-            .append(Component.text(" - 重新加载配置", NamedTextColor.GRAY)));
+            .append(Component.text(" - 重载配置并迁移现存 NPC", NamedTextColor.GRAY)));
     sender.sendMessage(
         Component.text("/" + label + " forget [玩家名|all]", NamedTextColor.YELLOW)
             .append(Component.text(" - 清空对话历史", NamedTextColor.GRAY)));

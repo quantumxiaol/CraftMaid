@@ -70,6 +70,22 @@ public final class CraftMaid extends JavaPlugin {
     getServer().getPluginManager().registerEvents(new MaidCombatFightbackListener(this), this);
     maidNpcService.registerInteractionListener(maidMenuService);
 
+    getServer()
+        .getScheduler()
+        .runTask(
+            this,
+            () -> {
+              if (maidNpcService.isAvailable() && maidNpcService.hasStoredNpc()) {
+                boolean reconciled = maidNpcService.reconcileExistingNpc(false);
+                getLogger()
+                    .info(
+                        reconciled
+                            ? "已迁移现存女仆 NPC 状态，保留原 NPC ID 和 Citizens traits。"
+                            : "现存女仆 NPC 状态迁移未完全成功，请执行 /maid refresh 后检查日志。");
+              }
+              logRuntimeStatus();
+            });
+
     PluginCommand craftMaidCommand = getCommand("craftmaid");
     if (craftMaidCommand == null) {
       getLogger().severe("plugin.yml 中缺少 craftmaid 命令，命令功能不可用。");
@@ -154,9 +170,32 @@ public final class CraftMaid extends JavaPlugin {
     }
   }
 
-  public void reloadPlugin() {
+  public boolean reloadPlugin() {
+    if (jobService != null) {
+      jobService.stopActiveJobForExternalControl("配置重载，当前 job 已停止。");
+    }
     clearMaidSelfDefenseTargets();
     loadConfiguration();
+    if (maidNpcService == null || !maidNpcService.isAvailable() || !maidNpcService.hasStoredNpc()) {
+      return true;
+    }
+    return maidNpcService.reconcileExistingNpc(false);
+  }
+
+  public void logRuntimeStatus() {
+    int npcId = maidNpcService == null ? -1 : maidNpcService.getStoredNpcId();
+    boolean npcFound = maidNpcService != null && maidNpcService.hasStoredNpc();
+    boolean npcSpawned = maidNpcService != null && maidNpcService.isStoredNpcSpawned();
+    getLogger()
+        .info(
+            "CraftMaid version="
+                + getPluginMeta().getVersion()
+                + " npcId="
+                + npcId
+                + " npcFound="
+                + npcFound
+                + " npcSpawned="
+                + npcSpawned);
   }
 
   public String getMaidName() {

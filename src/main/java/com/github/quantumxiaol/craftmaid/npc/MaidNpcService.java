@@ -25,6 +25,18 @@ public interface MaidNpcService {
 
   boolean despawnStored();
 
+  boolean showStored();
+
+  boolean removeStored();
+
+  boolean reconcileExistingNpc(boolean respawnEntity);
+
+  int getStoredNpcId();
+
+  boolean hasStoredNpc();
+
+  boolean isStoredNpcSpawned();
+
   boolean applyConfiguredSkin(Player fallbackPlayer);
 
   boolean syncConfiguredName();

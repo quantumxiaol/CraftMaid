@@ -65,14 +65,14 @@ CraftMaid 分成两层能力。
 
 ```bash
 mkdir -p plugins
-curl -fL -o plugins/CraftMaid-v1.1.0.jar \
-  https://github.com/quantumxiaol/CraftMaid/releases/download/v1.1.0/CraftMaid-v1.1.0.jar
+curl -fL -o plugins/CraftMaid-v1.2.4.jar \
+  https://github.com/quantumxiaol/CraftMaid/releases/download/v1.2.4/CraftMaid-v1.2.4.jar
 ```
 
 以后换版本时只改 `VERSION`：
 
 ```bash
-VERSION=v1.1.0
+VERSION=v1.2.4
 mkdir -p plugins
 curl -fL -o "plugins/CraftMaid-${VERSION}.jar" \
   "https://github.com/quantumxiaol/CraftMaid/releases/download/${VERSION}/CraftMaid-${VERSION}.jar"
@@ -102,7 +102,7 @@ cd CraftMaid
 mvn clean package
 ```
 
-编译完成后，将 `target/CraftMaid-1.0-SNAPSHOT.jar` 放入服务端的 `plugins` 文件夹下。
+编译完成后，将 `target/CraftMaid-1.2.5.jar` 放入服务端的 `plugins` 文件夹下。
 提交代码前可以运行 `mvn spotless:apply` 自动整理 Java 格式；CI 会执行 `mvn -B spotless:check` 和 `mvn -B clean package`。
 
 ## 🚀 GitHub Actions 自动发布
@@ -114,8 +114,8 @@ mvn clean package
 
 发布新版本：
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.5
+git push origin v1.2.5
 ```
 
 
@@ -264,7 +264,7 @@ jobs:
     max_blocks_per_tick: 4
     max_blocks_per_run: 128
 ```
-修改完成后，在游戏中输入 `/craftmaid reload` 即可热重载配置。
+修改配置后，在游戏中输入 `/craftmaid reload` 即可热重载配置，并同步迁移已记录的 Citizens NPC 状态；替换 jar 后仍然需要完整重启服务器。
 
 DeepSeek 示例：
 ```yaml
@@ -328,7 +328,7 @@ conversation:
 
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.control` 权限的玩家执行。`craftmaid.admin` 默认只负责插件管理；只有把 `maid.access.admin_can_control` 设为 `true` 时，管理员才自动获得女仆控制权。
 
-权限分为三层：`craftmaid.view` 默认所有玩家可用，只允许打开菜单和查看状态；`craftmaid.control` 默认不授予，用于跟随、护卫、工作、装备和锚点操作；`craftmaid.admin` 默认授予 OP，用于 reload、spawn/despawn 和历史管理。配置中的 `maid.master` 不需要额外权限，始终拥有控制权。默认 `guard_target_policy: master_only` 下，“保护主人”始终以在线的 `maid.master` 为 Sentinel 守护对象，不会把点击菜单的 OP 自动改成守护对象。
+权限分为三层：`craftmaid.view` 默认所有玩家可用，只允许打开菜单和查看状态；`craftmaid.control` 默认不授予，用于跟随、护卫、工作、装备和锚点操作；`craftmaid.admin` 默认授予 OP，用于 reload、spawn/hide/show/refresh/remove 和历史管理。配置中的 `maid.master` 不需要额外权限，始终拥有控制权。默认 `guard_target_policy: master_only` 下，“保护主人”始终以在线的 `maid.master` 为 Sentinel 守护对象，不会把点击菜单的 OP 自动改成守护对象。
 
 anchors / regions 会保存到 `plugins/CraftMaid/anchors.yml`，用于钓鱼、农田、红石机器监控和回家。当前钓鱼已经使用 `fishing_spot` 和 `pond`，农田收割已经使用 `farm`，并可选使用 `harvest_spot` 指定田边站位；ChunkKeeper 已经使用 `redstone_watch`；箱子整理还只是数据准备。
 
@@ -433,12 +433,19 @@ regions:
 
 护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫；插件每秒检查一次，到期、超距、离线或跨世界都会同时删除 Sentinel UUID 目标并结束追击。“解除敌意”可立即清除全部当前玩家自卫目标。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
 
-`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先确认已经替换到最新 jar，并且服务器实际加载的 `plugins/CraftMaid/config.yml` 里有 `maid.combat.enemy_exp: true`。已经处于护卫状态的旧 NPC 需要重新点击一次“保护主人”或“守在这里”，让新设置写入 Sentinel trait。
+`maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先用 `/maid version` 确认实际加载的版本，并检查 `plugins/CraftMaid/config.yml` 里是否有 `maid.combat.enemy_exp: true`。reload/refresh 会清理旧 Sentinel 战斗状态；之后再次点击“保护主人”或“守在这里”会按当前配置建立新的护卫状态。
 
-移除已记录的女仆 NPC：
+NPC 生命周期管理：
 ```
-/craftmaid despawn
+/craftmaid version         # 查看插件版本、NPC ID、是否找到和是否已生成
+/craftmaid hide            # 暂时隐藏，保留 NPC ID、背包、装备和全部 Citizens traits
+/craftmaid despawn         # hide 的兼容别名，同样不会删除数据
+/craftmaid show            # 在 Citizens 记录的原位置重新显示同一个 NPC
+/craftmaid refresh         # 原地迁移/刷新现存 NPC，不改变 ID、背包和装备
+/craftmaid remove confirm  # 永久删除 NPC 和全部 Citizens 数据，不可撤销
 ```
+
+`/craftmaid reload` 只热重载配置和运行时客户端，不会替换正在运行的 Java 类；更新 jar 后仍然必须完整重启服务器。重启或执行 reload 时，CraftMaid 会自动对 `maid.npc_id` 指向的现存 NPC 做非破坏性 reconcile：停止旧导航和临时战斗状态，清理 CraftMaid 管理的 Sentinel 目标并应用新配置，但不会调用 Citizens `destroy()`，也不会删除 Inventory、Equipment 或 Skin traits。需要强制让实体重新生成时使用 `/craftmaid refresh`。
 
 跟随控制：
 ```

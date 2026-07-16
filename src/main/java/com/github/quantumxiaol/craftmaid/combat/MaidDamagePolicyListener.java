@@ -14,6 +14,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.projectiles.ProjectileSource;
 
 public final class MaidDamagePolicyListener implements Listener {
@@ -24,6 +26,19 @@ public final class MaidDamagePolicyListener implements Listener {
 
   public MaidDamagePolicyListener(CraftMaid plugin) {
     this.plugin = plugin;
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onPlayerJoin(PlayerJoinEvent event) {
+    Player player = event.getPlayer();
+    if (!plugin.getMaidSelfDefenseService().isActiveTarget(player)) {
+      plugin.getMaidNpcService().removeSelfDefenseTarget(player.getUniqueId(), player.getName());
+    }
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onPlayerQuit(PlayerQuitEvent event) {
+    plugin.getMaidSelfDefenseService().forgive(event.getPlayer());
   }
 
   @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)

@@ -123,18 +123,83 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
 
-    stopFollowing();
-    cancelGuardFightbackTargets();
-    plugin.clearMaidSelfDefenseTargets();
-    plugin.getMaidCombatBuffService().stop();
-    guarding = false;
-    if (npc.isSpawned()) {
-      npc.despawn();
+    resetTransientState(npc);
+    resetSentinelState(npc);
+    return !npc.isSpawned() || npc.despawn();
+  }
+
+  @Override
+  public boolean showStored() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
     }
+    syncConfiguredName(npc);
+    applyConfiguredSkin(npc, Bukkit.getPlayerExact(plugin.getMasterName()));
+    if (npc.isSpawned()) {
+      return true;
+    }
+    Location location = npc.getStoredLocation();
+    return location != null && location.getWorld() != null && npc.spawn(location);
+  }
+
+  @Override
+  public boolean removeStored() {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    resetTransientState(npc);
     npc.destroy();
     plugin.getConfig().set("maid.npc_id", -1);
     plugin.saveConfig();
     return true;
+  }
+
+  @Override
+  public boolean reconcileExistingNpc(boolean respawnEntity) {
+    NPC npc = getStoredNpcOrNull();
+    if (npc == null) {
+      return false;
+    }
+
+    boolean wasSpawned = npc.isSpawned();
+    Location storedLocation = npc.getStoredLocation();
+    if (storedLocation != null) {
+      storedLocation = storedLocation.clone();
+    }
+
+    resetTransientState(npc);
+    boolean sentinelReset = resetSentinelState(npc);
+    syncConfiguredName(npc);
+    applyConfiguredSkin(npc, Bukkit.getPlayerExact(plugin.getMasterName()));
+
+    if (respawnEntity && wasSpawned) {
+      npc.despawn();
+      if (storedLocation == null
+          || storedLocation.getWorld() == null
+          || !npc.spawn(storedLocation)) {
+        return false;
+      }
+    }
+    return sentinelReset;
+  }
+
+  @Override
+  public int getStoredNpcId() {
+    return plugin.getConfig().getInt("maid.npc_id", -1);
+  }
+
+  @Override
+  public boolean hasStoredNpc() {
+    return getStoredNpcOrNull() != null;
+  }
+
+  @Override
+  public boolean isStoredNpcSpawned() {
+    NPC npc = getStoredNpcOrNull();
+    return npc != null && npc.isSpawned();
   }
 
   @Override
@@ -816,6 +881,54 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     return CitizensAPI.getNPCRegistry().getById(npcId);
   }
 
+  private void resetTransientState(NPC npc) {
+    stopFollowing();
+    stopFishingAnimation();
+    cancelGuardFightbackTargets();
+    plugin.clearMaidSelfDefenseTargets();
+    plugin.getMaidCombatBuffService().stop();
+    guarding = false;
+    if (npc.getNavigator().isNavigating()) {
+      npc.getNavigator().cancelNavigation();
+    }
+    resetNavigatorSpeed(npc);
+  }
+
+  private boolean resetSentinelState(NPC npc) {
+    if (!isGuardAvailable()) {
+      return true;
+    }
+    try {
+      Object trait = getSentinelTrait(npc);
+      invoke(trait, "setGuarding", new Class<?>[] {UUID.class}, new Object[] {null});
+      cleanupSentinelCombat(trait);
+      clearSentinelPlayerTargets(trait);
+      List<String> unsupported = new ArrayList<>();
+      applySentinelBaseConfiguration(trait, unsupported);
+      reportSentinelCompatibilityIssues(unsupported);
+      return true;
+    } catch (ReflectiveOperationException | LinkageError ex) {
+      plugin.getLogger().warning("迁移现存 NPC 的 Sentinel 状态失败: " + rootMessage(ex));
+      return false;
+    }
+  }
+
+  private void clearSentinelPlayerTargets(Object trait) {
+    for (Player player : Bukkit.getOnlinePlayers()) {
+      UUID playerId = player.getUniqueId();
+      String uuidTarget = sentinelPlayerTargetKey(playerId);
+      optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, uuidTarget);
+      optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, uuidTarget);
+      optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, uuidTarget);
+      for (String legacyTarget : sentinelLegacyPlayerTargetKeys(player.getName())) {
+        optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, legacyTarget);
+        optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, legacyTarget);
+        optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, legacyTarget);
+      }
+      optionalInvokeIgnored(trait, "whenAnEnemyDies", new Class<?>[] {UUID.class}, playerId);
+    }
+  }
+
   private void configureFollowNavigation(NPC npc) {
     CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
     var parameters = npc.getNavigator().getLocalParameters();
@@ -1113,6 +1226,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, avoid);
     }
 
+    applySentinelBaseConfiguration(trait, unsupported);
+    reportSentinelCompatibilityIssues(unsupported);
+  }
+
+  private void applySentinelBaseConfiguration(Object trait, List<String> unsupported) {
     collectUnsupportedField(
         unsupported,
         "enemyDrops",
@@ -1123,7 +1241,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     collectUnsupportedField(
         unsupported, "guardSelectionRange", optionalSetField(trait, "guardSelectionRange", 6.0));
     configureSentinelSurvivability(trait, unsupported);
-    reportSentinelCompatibilityIssues(unsupported);
   }
 
   private void scheduleGuardFightbackCleanup(String targetKey) {
