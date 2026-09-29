@@ -16,6 +16,9 @@ public final class MaidIntentDetector {
     if (isQuestionAboutJob(normalized) || isNegatedJobRequest(normalized)) {
       return Optional.empty();
     }
+    if (normalized.equals("回来") || containsAny(normalized, "回来吧", "先回来", "回来一下", "回来休息")) {
+      return Optional.of(MaidIntent.RECALL);
+    }
     if (containsAny(normalized, "去钓鱼", "开始钓鱼", "钓鱼去", "帮我钓鱼", "去鱼塘", "钓会鱼", "钓点鱼")) {
       return Optional.of(MaidIntent.FISHING_START);
     }
@@ -41,7 +44,7 @@ public final class MaidIntentDetector {
     if (containsAny(normalized, "停止工作", "停下工作", "别忙了", "休息一下", "停手", "先停下")) {
       return true;
     }
-    return normalized.equals("回来") || containsAny(normalized, "回来吧", "先回来", "回来一下", "回来休息");
+    return false;
   }
 
   private boolean isNegatedJobRequest(String normalized) {

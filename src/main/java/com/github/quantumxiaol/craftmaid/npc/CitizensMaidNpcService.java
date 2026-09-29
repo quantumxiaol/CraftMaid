@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.citizensnpcs.api.CitizensAPI;
+import net.citizensnpcs.api.ai.NavigatorParameters;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.Trait;
 import net.citizensnpcs.api.trait.trait.Equipment;
@@ -42,7 +43,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private static final String SKIN_TRAIT_CLASS = "net.citizensnpcs.trait.SkinTrait";
   private static final String SENTINEL_PLUGIN = "Sentinel";
   private static final String SENTINEL_TRAIT_CLASS = "org.mcmonkey.sentinel.SentinelTrait";
-  private static final float DEFAULT_NAVIGATOR_SPEED = 1.0F;
   private static final long FIGHTBACK_TARGET_TICKS = 15L * 20L;
 
   private final CraftMaid plugin;
@@ -54,6 +54,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private int followStuckRetries;
   private long followNextTeleportAtMillis;
   private boolean guarding;
+  private long guardRevision;
+  private Player followingPlayer;
+  private NavigatorParameters savedNavigationParameters;
+  private NPC configuredNavigationNpc;
+  private NPC fishingAnimationNpc;
 
   public CitizensMaidNpcService(CraftMaid plugin) {
     this.plugin = plugin;
@@ -112,8 +117,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc.isSpawned()) {
       npc.despawn();
     }
-    npc.spawn(player.getLocation());
-    return true;
+    return npc.spawn(player.getLocation());
   }
 
   @Override
@@ -135,7 +139,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
     syncConfiguredName(npc);
-    applyConfiguredSkin(npc, Bukkit.getPlayerExact(plugin.getMasterName()));
+    applyConfiguredSkin(npc, plugin.getOnlineMaster());
     if (npc.isSpawned()) {
       return true;
     }
@@ -173,7 +177,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     resetTransientState(npc);
     boolean sentinelReset = resetSentinelState(npc);
     syncConfiguredName(npc);
-    applyConfiguredSkin(npc, Bukkit.getPlayerExact(plugin.getMasterName()));
+    applyConfiguredSkin(npc, plugin.getOnlineMaster());
 
     if (respawnEntity && wasSpawned) {
       npc.despawn();
@@ -189,6 +193,12 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   @Override
   public int getStoredNpcId() {
     return plugin.getConfig().getInt("maid.npc_id", -1);
+  }
+
+  @Override
+  public java.util.UUID getStoredNpcUniqueId() {
+    NPC npc = getStoredNpcOrNull();
+    return npc == null ? null : npc.getUniqueId();
   }
 
   @Override
@@ -262,7 +272,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc.isSpawned()) {
       npc.teleport(home, PlayerTeleportEvent.TeleportCause.PLUGIN);
     } else {
-      npc.spawn(home);
+      return npc.spawn(home);
     }
     return true;
   }
@@ -289,11 +299,12 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
 
-    if (!npc.isSpawned()) {
-      npc.spawn(player.getLocation());
+    if (!npc.isSpawned() && !npc.spawn(player.getLocation())) {
+      return false;
     }
 
     stopFollowing();
+    followingPlayer = player;
     NPC followNpc = npc;
     configureFollowNavigation(followNpc);
     updateFollowTarget(followNpc, player);
@@ -307,7 +318,6 @@ public final class CitizensMaidNpcService implements MaidNpcService {
                     stopFollowing();
                     return;
                   }
-                  configureFollowNavigation(followNpc);
                   updateFollowTarget(followNpc, player);
                 },
                 updateTicks,
@@ -317,6 +327,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   @Override
   public boolean stopFollowing() {
+    boolean wasFollowing = followTask != null;
+    followingPlayer = null;
     if (followTask != null) {
       followTask.cancel();
       followTask = null;
@@ -327,11 +339,16 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     followNextTeleportAtMillis = 0L;
 
     NPC npc = getStoredNpcOrNull();
-    if (npc != null && npc.isSpawned()) {
+    if (wasFollowing && npc != null) {
       npc.getNavigator().cancelNavigation();
-      resetNavigatorSpeed(npc);
+      restoreNavigationParameters(npc);
     }
     return true;
+  }
+
+  @Override
+  public Player getFollowingPlayer() {
+    return followingPlayer;
   }
 
   @Override
@@ -347,7 +364,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
 
     npc.getNavigator().cancelNavigation();
-    resetNavigatorSpeed(npc);
+    restoreNavigationParameters(npc);
     return true;
   }
 
@@ -392,8 +409,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return false;
     }
 
-    configureDirectedNavigation(npc);
     npc.getNavigator().cancelNavigation();
+    configureDirectedNavigation(npc);
     npc.getNavigator().setTarget(location);
     return true;
   }
@@ -474,19 +491,34 @@ public final class CitizensMaidNpcService implements MaidNpcService {
             target.getWorld().getName());
     boolean selected =
         Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc select " + npc.getId());
+    if (!selected) {
+      return false;
+    }
     boolean started = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc fish " + targetText);
-    return selected && started;
+    if (started) {
+      fishingAnimationNpc = npc;
+    }
+    return started;
   }
 
   @Override
   public void stopFishingAnimation() {
-    if (plugin.getServer().getPluginManager().isPluginEnabled("Denizen")) {
+    NPC animationNpc = fishingAnimationNpc;
+    fishingAnimationNpc = null;
+    if (animationNpc != null
+        && CitizensAPI.getNPCRegistry().getById(animationNpc.getId()) == animationNpc
+        && plugin.getServer().getPluginManager().isPluginEnabled("Denizen")
+        && Bukkit.dispatchCommand(
+            Bukkit.getConsoleSender(), "npc select " + animationNpc.getId())) {
       Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "npc stopfishing");
     }
   }
 
   @Override
   public boolean openInventory(Player player) {
+    if (plugin.getMaidMenuService().isEquipmentEditing()) {
+      return false;
+    }
     NPC npc = ensureSpawnedNear(player);
     if (npc == null) {
       return false;
@@ -617,6 +649,13 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return MaidEquipment.empty();
     }
 
+    // Citizens shares the main hand with backpack slot zero. Settle any open view first.
+    var backpack = npc.getOrAddTrait(Inventory.class).getInventoryView();
+    if (backpack != null) {
+      for (var viewer : List.copyOf(backpack.getViewers())) {
+        viewer.closeInventory();
+      }
+    }
     Equipment equipment = npc.getOrAddTrait(Equipment.class);
     return new MaidEquipment(
         equipment.get(EquipmentSlot.HAND),
@@ -659,6 +698,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   @Override
+  public long guardingRevision() {
+    return guardRevision;
+  }
+
+  @Override
   public boolean isGuarding() {
     return guarding;
   }
@@ -675,6 +719,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, player.getUniqueId());
       configureSentinelCombat(trait);
       guarding = true;
+      guardRevision++;
       plugin.getMaidCombatBuffService().start();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
@@ -798,6 +843,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       configureSentinelCombat(trait);
       guarding = true;
+      guardRevision++;
       plugin.getMaidCombatBuffService().start();
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
@@ -815,6 +861,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     cancelGuardFightbackTargets();
     plugin.clearMaidSelfDefenseTargets();
     guarding = false;
+    guardRevision++;
     plugin.getMaidCombatBuffService().stop();
     NPC npc = getStoredNpcOrNull();
     if (npc == null || !isGuardAvailable()) {
@@ -828,6 +875,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       Object trait = getSentinelTrait(npc);
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
       cleanupSentinelCombat(trait);
+      clearSentinelNavigationState(trait);
       if (stopNavigation) {
         stopMoving();
       }
@@ -852,8 +900,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npc != null) {
       syncConfiguredName(npc);
     }
-    if (npc != null && !npc.isSpawned()) {
-      npc.spawn(player.getLocation());
+    if (npc != null && !npc.isSpawned() && !npc.spawn(player.getLocation())) {
+      return null;
     }
     return npc;
   }
@@ -867,8 +915,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       applyConfiguredSkin(npc, null);
     }
     syncConfiguredName(npc);
-    if (!npc.isSpawned()) {
-      npc.spawn(location);
+    if (!npc.isSpawned() && !npc.spawn(location)) {
+      return null;
     }
     return npc;
   }
@@ -888,10 +936,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     plugin.clearMaidSelfDefenseTargets();
     plugin.getMaidCombatBuffService().stop();
     guarding = false;
+    guardRevision++;
     if (npc.getNavigator().isNavigating()) {
       npc.getNavigator().cancelNavigation();
     }
-    resetNavigatorSpeed(npc);
+    restoreNavigationParameters(npc);
   }
 
   private boolean resetSentinelState(NPC npc) {
@@ -902,6 +951,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       Object trait = getSentinelTrait(npc);
       invoke(trait, "setGuarding", new Class<?>[] {UUID.class}, new Object[] {null});
       cleanupSentinelCombat(trait);
+      clearSentinelNavigationState(trait);
       clearSentinelPlayerTargets(trait);
       List<String> unsupported = new ArrayList<>();
       applySentinelBaseConfiguration(trait, unsupported);
@@ -931,32 +981,57 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
   private void configureFollowNavigation(NPC npc) {
     CraftMaidConfig.FollowSettings settings = plugin.getMaidFollowSettings();
-    var parameters = npc.getNavigator().getLocalParameters();
-    parameters.speed((float) settings.speed());
+    var parameters = navigationParameters(npc);
+    parameters.speedModifier((float) settings.speed());
     parameters.updatePathRate(settings.updateTicks());
     parameters.distanceMargin(settings.stopDistance());
     parameters.pathDistanceMargin(settings.stopDistance());
-    parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
+    parameters.straightLineTargetingDistance(0.0F);
     // Citizens' destination teleport is too eager for a companion NPC. CraftMaid handles the
     // rare teleport fallback explicitly, with distance gates and cooldowns.
     parameters.destinationTeleportMargin(-1.0);
+    parameters.stuckAction(null);
     parameters.avoidWater(true);
   }
 
   private void configureDirectedNavigation(NPC npc) {
     CraftMaidConfig.JobNavigationSettings settings = plugin.getJobNavigationSettings();
-    var parameters = npc.getNavigator().getLocalParameters();
-    parameters.speed((float) settings.speed());
+    var parameters = navigationParameters(npc);
+    parameters.speedModifier((float) settings.speed());
     parameters.updatePathRate(settings.updateTicks());
     parameters.distanceMargin(settings.arrivalDistance());
     parameters.pathDistanceMargin(settings.arrivalDistance());
     parameters.straightLineTargetingDistance((float) settings.straightLineDistance());
     parameters.destinationTeleportMargin(-1.0);
+    parameters.stuckAction(null);
     parameters.avoidWater(true);
   }
 
-  private void resetNavigatorSpeed(NPC npc) {
-    npc.getNavigator().getLocalParameters().speed(DEFAULT_NAVIGATOR_SPEED);
+  private NavigatorParameters navigationParameters(NPC npc) {
+    var parameters = npc.getNavigator().getDefaultParameters();
+    if (configuredNavigationNpc != npc) {
+      configuredNavigationNpc = npc;
+      savedNavigationParameters = parameters.clone();
+    }
+    return parameters;
+  }
+
+  private void restoreNavigationParameters(NPC npc) {
+    if (configuredNavigationNpc != npc || savedNavigationParameters == null) {
+      return;
+    }
+    var parameters = npc.getNavigator().getDefaultParameters();
+    parameters.speedModifier(savedNavigationParameters.speedModifier());
+    parameters.updatePathRate(savedNavigationParameters.updatePathRate());
+    parameters.distanceMargin(savedNavigationParameters.distanceMargin());
+    parameters.pathDistanceMargin(savedNavigationParameters.pathDistanceMargin());
+    parameters.straightLineTargetingDistance(
+        savedNavigationParameters.straightLineTargetingDistance());
+    parameters.destinationTeleportMargin(savedNavigationParameters.destinationTeleportMargin());
+    parameters.stuckAction(savedNavigationParameters.stuckAction());
+    parameters.avoidWater(savedNavigationParameters.avoidWater());
+    configuredNavigationNpc = null;
+    savedNavigationParameters = null;
   }
 
   private void updateFollowTarget(NPC npc, Player player) {
@@ -971,7 +1046,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     if (npcLocation.getWorld() == null
         || playerLocation.getWorld() == null
         || !npcLocation.getWorld().equals(playerLocation.getWorld())) {
-      if (!maybeTeleportNearPlayer(npc, player, settings, true)) {
+      if (!maybeTeleportNearPlayer(npc, player, settings)) {
         npc.getNavigator().cancelNavigation();
         resetFollowStuck(npcLocation);
       }
@@ -998,7 +1073,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
 
     if (distanceSquared >= teleportDistanceSquared
-        && maybeTeleportNearPlayer(npc, player, settings, false)) {
+        && maybeTeleportNearPlayer(npc, player, settings)) {
       return;
     }
 
@@ -1007,25 +1082,33 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       followLastLocation = npcLocation;
       followStuckTicks = 0;
       npc.getNavigator().cancelNavigation();
-      npc.getNavigator().setTarget(player, false);
       double stuckTeleportMinDistanceSquared =
           settings.stuckTeleportMinDistance() * settings.stuckTeleportMinDistance();
-      if (followStuckRetries >= settings.stuckRetryBeforeTeleport()
+      if (settings.teleportOnStuckSeconds() > 0
+          && followStuckRetries >= settings.stuckRetryBeforeTeleport()
           && distanceSquared >= stuckTeleportMinDistanceSquared
-          && maybeTeleportNearPlayer(npc, player, settings, false)) {
+          && maybeTeleportNearPlayer(npc, player, settings)) {
         return;
       }
-      return;
     }
 
-    npc.getNavigator().setTarget(player, false);
+    var navigator = npc.getNavigator();
+    var target = navigator.getEntityTarget();
+    if (!navigator.isNavigating()
+        || target == null
+        || target.isAggressive()
+        || !player.equals(target.getTarget())) {
+      navigator.setTarget(player, false);
+    }
+    // Straight-line steering is only appropriate with a clear line of sight.
+    boolean visible =
+        npc.getEntity() instanceof LivingEntity living && living.hasLineOfSight(player);
+    navigator
+        .getLocalParameters()
+        .straightLineTargetingDistance(visible ? (float) settings.straightLineDistance() : 0.0F);
   }
 
   private boolean isFollowStuck(Location npcLocation, CraftMaidConfig.FollowSettings settings) {
-    if (settings.teleportOnStuckSeconds() <= 0) {
-      resetFollowStuck(npcLocation);
-      return false;
-    }
     if (followLastLocation == null
         || followLastLocation.getWorld() == null
         || !followLastLocation.getWorld().equals(npcLocation.getWorld())) {
@@ -1038,7 +1121,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     } else {
       resetFollowStuck(npcLocation);
     }
-    return followStuckTicks >= settings.teleportOnStuckSeconds() * 20;
+    int retrySeconds =
+        settings.teleportOnStuckSeconds() > 0 ? settings.teleportOnStuckSeconds() : 5;
+    return followStuckTicks >= retrySeconds * 20;
   }
 
   private void resetFollowStuck(Location npcLocation) {
@@ -1048,14 +1133,16 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   }
 
   private boolean maybeTeleportNearPlayer(
-      NPC npc, Player player, CraftMaidConfig.FollowSettings settings, boolean ignoreCooldown) {
+      NPC npc, Player player, CraftMaidConfig.FollowSettings settings) {
     if (!settings.teleportEnabled()) {
       return false;
     }
     long now = System.currentTimeMillis();
-    if (!ignoreCooldown && now < followNextTeleportAtMillis) {
+    if (now < followNextTeleportAtMillis) {
       return false;
     }
+    // Failed searches must back off too, including cross-world attempts.
+    followNextTeleportAtMillis = now + Math.max(1, settings.teleportCooldownSeconds()) * 1000L;
     Location target = findSafeFollowLocation(player);
     if (target == null) {
       return false;
@@ -1180,7 +1267,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       return null;
     }
     if (skin.equalsIgnoreCase("master")) {
-      return plugin.getMasterName();
+      Player master = plugin.getOnlineMaster();
+      return master == null ? plugin.getMasterName() : master.getName();
     }
     if (skin.equalsIgnoreCase("player")) {
       return fallbackPlayer == null ? plugin.getMasterName() : fallbackPlayer.getName();
@@ -1307,6 +1395,22 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
   }
 
+  private void clearSentinelNavigationState(Object trait) throws ReflectiveOperationException {
+    // Removing target labels alone leaves Sentinel's live chase/return-home state active.
+    Object helper = trait.getClass().getField("targetingHelper").get(trait);
+    for (String field : List.of("currentTargets", "currentAvoids")) {
+      ((Map<?, ?>) helper.getClass().getField(field).get(helper)).clear();
+    }
+    invoke(trait, "tryUpdateChaseTarget", new Class<?>[] {LivingEntity.class}, new Object[] {null});
+    if (trait.getClass().getField("chasing").get(trait) != null) {
+      throw new ReflectiveOperationException("Sentinel chase cancellation was rejected");
+    }
+    setField(trait, "pathingTo", null);
+    setField(trait, "chased", false);
+    setField(trait, "needsSafeReturn", false);
+    optionalInvokeIgnored(trait, "stopBlocking", new Class<?>[0]);
+  }
+
   private void configureSentinelSurvivability(Object trait, List<String> unsupported) {
     CraftMaidConfig.SurvivabilitySettings settings = plugin.getMaidSurvivabilitySettings();
     if (settings == null || !settings.enabled()) {
@@ -1321,11 +1425,11 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     collectUnsupportedField(
         unsupported,
         "healRate",
-        optionalSetField(trait, "healRate", settings.sentinelHealrateSeconds()));
+        optionalSetField(trait, "healRate", Math.round(settings.sentinelHealrateSeconds() * 20.0)));
     collectUnsupportedField(
         unsupported,
         "respawnTime",
-        optionalSetField(trait, "respawnTime", settings.sentinelRespawnSeconds()));
+        optionalSetField(trait, "respawnTime", settings.sentinelRespawnSeconds() * 20L));
     collectUnsupportedField(
         unsupported,
         "invincible",

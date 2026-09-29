@@ -10,6 +10,7 @@ import com.github.quantumxiaol.craftmaid.combat.MaidSelfDefenseService;
 import com.github.quantumxiaol.craftmaid.command.CraftMaidCommand;
 import com.github.quantumxiaol.craftmaid.command.FollowCommand;
 import com.github.quantumxiaol.craftmaid.config.CraftMaidConfig;
+import com.github.quantumxiaol.craftmaid.control.MaidControlService;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationHistory;
 import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService;
 import com.github.quantumxiaol.craftmaid.job.MaidJobEventBuffer;
@@ -34,6 +35,7 @@ public final class CraftMaid extends JavaPlugin {
   private MaidJobEventBuffer jobEventBuffer;
   private MaidJobService jobService;
   private MaidNpcService maidNpcService;
+  private MaidControlService maidControlService;
   private MaidMenuService maidMenuService;
   private MaidCombatPolicy combatPolicy;
   private MaidCombatBuffService combatBuffService;
@@ -52,6 +54,7 @@ public final class CraftMaid extends JavaPlugin {
     jobEventBuffer = new MaidJobEventBuffer();
     jobService = new MaidJobService(this);
     maidNpcService = MaidNpcServices.create(this);
+    maidControlService = new MaidControlService(this);
     maidMenuService = new MaidMenuService(this);
     combatBuffService = new MaidCombatBuffService(this);
     perceptionService = new MaidPerceptionService(this);
@@ -109,6 +112,9 @@ public final class CraftMaid extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    if (maidMenuService != null) {
+      maidMenuService.closeEquipmentEditor();
+    }
     if (chatListener != null) {
       chatListener.shutdown();
     }
@@ -124,8 +130,11 @@ public final class CraftMaid extends JavaPlugin {
     if (jobService != null) {
       jobService.shutdown();
     }
+    if (maidNpcService != null && maidNpcService.isGuardAvailable()) {
+      maidNpcService.stopGuarding();
+    }
     if (conversationHistory != null) {
-      conversationHistory.save();
+      conversationHistory.shutdown();
     }
     getLogger().info("🎀 CraftMaid 正在休息...");
   }
@@ -171,6 +180,9 @@ public final class CraftMaid extends JavaPlugin {
   }
 
   public boolean reloadPlugin() {
+    conversationHistory.save();
+    maidControlService.invalidatePlans();
+    maidMenuService.closeEquipmentEditor();
     if (jobService != null) {
       jobService.stopActiveJobForExternalControl("配置重载，当前 job 已停止。");
     }
@@ -215,7 +227,20 @@ public final class CraftMaid extends JavaPlugin {
   }
 
   public boolean isMaster(Player player) {
-    return player != null && player.getName().equalsIgnoreCase(getMasterName());
+    if (player == null) {
+      return false;
+    }
+    var masterUuid = config.maid().masterUuid();
+    return masterUuid == null
+        ? player.getName().equalsIgnoreCase(getMasterName())
+        : masterUuid.equals(player.getUniqueId());
+  }
+
+  public Player getOnlineMaster() {
+    var masterUuid = config.maid().masterUuid();
+    return masterUuid == null
+        ? Bukkit.getPlayerExact(getMasterName())
+        : Bukkit.getPlayer(masterUuid);
   }
 
   public boolean canViewMaid(Player player) {
@@ -244,7 +269,7 @@ public final class CraftMaid extends JavaPlugin {
     if ("current_player".equals(getMaidAccessSettings().guardTargetPolicy())) {
       return controller;
     }
-    return Bukkit.getPlayerExact(getMasterName());
+    return getOnlineMaster();
   }
 
   public boolean isMaidEnemyDropsEnabled() {
@@ -375,5 +400,13 @@ public final class CraftMaid extends JavaPlugin {
 
   public MaidNpcService getMaidNpcService() {
     return maidNpcService;
+  }
+
+  public MaidControlService getMaidControlService() {
+    return maidControlService;
+  }
+
+  public MaidMenuService getMaidMenuService() {
+    return maidMenuService;
   }
 }

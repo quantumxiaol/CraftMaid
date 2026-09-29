@@ -95,7 +95,7 @@ final class HarvestFarmJob implements MaidJob, Runnable {
   }
 
   @Override
-  public JobActionResult start() {
+  public JobActionResult prepare() {
     HarvestSettings settings = plugin.getHarvestSettings();
     if (farm.volume() > settings.maxRegionVolume()) {
       phase = JobPhase.FAILED;
@@ -129,7 +129,17 @@ final class HarvestFarmJob implements MaidJob, Runnable {
     }
     chunkTickets.addLocation(standPoint);
     travelController = new JobTravelController(plugin, standPoint);
-    if (!plugin.getMaidNpcService().moveTo(standPoint)) {
+    return JobActionResult.success("工作配置已检查。");
+  }
+
+  @Override
+  public void discardPreparation() {
+    chunkTickets.release();
+  }
+
+  @Override
+  public JobActionResult start() {
+    if (!plugin.getMaidNpcService().moveTo(travelController.target())) {
       phase = JobPhase.FAILED;
       chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 farm/" + name + "。");

@@ -1,0 +1,51 @@
+package com.github.quantumxiaol.craftmaid.conversation;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import com.github.quantumxiaol.craftmaid.CraftMaid;
+import java.nio.file.Path;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class ConversationHistoryTest {
+  @TempDir Path directory;
+
+  @Test
+  void shutdownFlushesBatchedHistoryAndForget() throws Exception {
+    CraftMaid plugin = mock(CraftMaid.class);
+    when(plugin.getDataFolder()).thenReturn(directory.toFile());
+    var history = new ConversationHistory(plugin);
+    history.configure(true, 100, 1200, 4000, true, "history.json");
+    UUID playerId = UUID.randomUUID();
+    history.appendExchange(playerId, "player", "hello", "world");
+    history.appendExchange(playerId, "player", "second", "reply");
+    history.shutdown();
+    var reloaded = new ConversationHistory(plugin);
+    reloaded.configure(true, 100, 1200, 4000, true, "history.json");
+    assertEquals(4, reloaded.getHistorySize(playerId));
+    reloaded.clearAll();
+    reloaded.shutdown();
+    var cleared = new ConversationHistory(plugin);
+    cleared.configure(true, 100, 1200, 4000, true, "history.json");
+    assertEquals(0, cleared.getHistorySize(playerId));
+    cleared.shutdown();
+  }
+
+  @Test
+  void limitsPlayerSpeechButPreservesComposedActionResults() {
+    CraftMaid plugin = mock(CraftMaid.class);
+    when(plugin.getDataFolder()).thenReturn(directory.toFile());
+    ConversationHistory history = new ConversationHistory(plugin);
+    history.configure(true, 100, 1200, 4000, false, "history.json");
+    String speech = history.limitPlayerSpeech("x".repeat(1500));
+    assertEquals(1203, speech.length());
+    String prompt = speech + "\n环境：" + "水".repeat(2000) + "\n动作结果：failure\nactions=[]";
+    assertEquals(
+        prompt, history.buildPromptMessages(UUID.randomUUID(), prompt).getLast().content());
+    history.configure(false, 100, 1200, 4000, false, "history.json");
+    assertEquals(
+        prompt, history.buildPromptMessages(UUID.randomUUID(), prompt).getLast().content());
+  }
+}

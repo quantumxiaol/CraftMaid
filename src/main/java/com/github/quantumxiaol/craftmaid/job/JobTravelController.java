@@ -12,11 +12,16 @@ final class JobTravelController {
 
   private int travelTicks;
   private int stalledTicks;
+  private int ticksSinceCheck;
   private double lastDistanceSquared = Double.POSITIVE_INFINITY;
 
   JobTravelController(CraftMaid plugin, Location target) {
     this.plugin = plugin;
     this.target = target.clone();
+  }
+
+  Location target() {
+    return target.clone();
   }
 
   boolean hasArrived() {
@@ -29,14 +34,17 @@ final class JobTravelController {
     travelTicks += periodTicks;
     JobNavigationSettings settings = plugin.getJobNavigationSettings();
     int retryTicks = Math.max(periodTicks, settings.retryTicks());
-    if (travelTicks % retryTicks == 0) {
-      retryIfStalled(retryTicks);
+    ticksSinceCheck += periodTicks;
+    if (ticksSinceCheck >= retryTicks) {
+      retryIfStalled(ticksSinceCheck);
+      ticksSinceCheck = 0;
     }
     return travelTicks < settings.arrivalTimeoutSeconds() * 20;
   }
 
   void reset() {
     travelTicks = 0;
+    ticksSinceCheck = 0;
     stalledTicks = 0;
     lastDistanceSquared = Double.POSITIVE_INFINITY;
   }

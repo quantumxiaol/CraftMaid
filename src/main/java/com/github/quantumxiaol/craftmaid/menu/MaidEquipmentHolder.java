@@ -24,6 +24,21 @@ final class MaidEquipmentHolder implements InventoryHolder {
           MAIN_HAND_SLOT, OFF_HAND_SLOT, HELMET_SLOT, CHESTPLATE_SLOT, LEGGINGS_SLOT, BOOTS_SLOT);
 
   private Inventory inventory;
+  private final MaidEquipmentEditor.Session session;
+
+  MaidEquipmentHolder(MaidEquipmentEditor.Session session) {
+    this.session = session;
+  }
+
+  MaidEquipmentEditor.Session session() {
+    return session;
+  }
+
+  void clearEquipment() {
+    for (int slot : EQUIPMENT_SLOTS) {
+      inventory.setItem(slot, null);
+    }
+  }
 
   void setInventory(Inventory inventory) {
     this.inventory = inventory;

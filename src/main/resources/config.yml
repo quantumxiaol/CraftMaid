@@ -6,7 +6,8 @@ llm:
   # 单次 HTTP 请求超时；hard_timeout_seconds 是整次 LLM 调用的最终兜底。
   timeout_seconds: 30
   hard_timeout_seconds: 40
-  # 仅 plan/chat/memory 在连接重置、超时或 HTTP 502/503/504 时重试；final 不重试动作。
+  # 仅 plan/chat/memory 在连接重置、超时或 HTTP 429/502/503/504 时重试；遵守 Retry-After。
+  # final 失败使用本地回复，不会重复执行动作。
   transient_retry_count: 1
   transient_retry_delay_millis: 500
   temperature: 0.7
@@ -14,6 +15,8 @@ llm:
 maid:
   name: "露西"
   master: "PlayerName"
+  # 可选：主人在本服务器的 UUID；填写后身份/权限/护卫按 UUID 匹配，master 保留作显示名。
+  master_uuid: ""
   language: "中文"
   # NPC 皮肤来源：master=使用 maid.master 的皮肤；player=使用触发操作的玩家皮肤；none/default=不主动设置；也可以直接填玩家名。
   skin: "master"
@@ -23,7 +26,7 @@ maid:
     # master_only=“保护主人”始终保护 maid.master；current_player=保护发起控制的玩家。
     guard_target_policy: "master_only"
   follow:
-    # Citizens Navigator 默认速度是 1.0；生存疾跑跟随建议 1.7-2.0，过高可能路径抖动。
+    # Citizens 基础速度的倍率，不覆盖基础速度；过高可能路径抖动。
     speed: 1.75
     update_ticks: 10
     stop_distance: 3.0
@@ -31,11 +34,13 @@ maid:
     # 传送只是跨世界、极远距离或严重卡住时的兜底，不是普通跟随机制。
     teleport_enabled: true
     teleport_distance: 128.0
-    # 0 表示关闭卡住自动传送；卡住时只重算路径，避免 3-8 格待机区误判后闪现。
+    # 0 表示关闭卡住自动传送，持续不动 5 秒时重算路径；正数为重试间隔秒数。
+    # 3-8 格待机区不会判定卡住；传送还受重试次数、最小距离、开关和冷却限制。
     teleport_on_stuck_seconds: 0
     teleport_cooldown_seconds: 30
     stuck_retry_before_teleport: 3
     stuck_teleport_min_distance: 24.0
+    # 跟随仅在看得见玩家时启用直线追踪；隔墙时交给寻路。
     straight_line_distance: 12.0
     # -1 表示禁用 Citizens 内部目的地传送；CraftMaid 会在代码里强制禁用该内部传送。
     destination_teleport_margin: -1.0

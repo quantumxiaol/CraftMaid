@@ -84,7 +84,7 @@ final class FishingJob implements MaidJob, Runnable {
   }
 
   @Override
-  public JobActionResult start() {
+  public JobActionResult prepare() {
     if (pond.volume() > MAX_POND_VOLUME) {
       phase = JobPhase.FAILED;
       return JobActionResult.failure("pond/" + name + " 区域太大，当前上限 " + MAX_POND_VOLUME + " 格。");
@@ -120,7 +120,17 @@ final class FishingJob implements MaidJob, Runnable {
       return JobActionResult.failure("fishing_spot/" + name + " 不是安全站位，请设置在水边平地上。");
     }
     travelController = new JobTravelController(plugin, standPoint);
-    if (!plugin.getMaidNpcService().moveTo(standPoint)) {
+    return JobActionResult.success("工作配置已检查。");
+  }
+
+  @Override
+  public void discardPreparation() {
+    chunkTickets.release();
+  }
+
+  @Override
+  public JobActionResult start() {
+    if (!plugin.getMaidNpcService().moveTo(travelController.target())) {
       phase = JobPhase.FAILED;
       chunkTickets.release();
       return JobActionResult.failure("无法让女仆移动到 fishing_spot/" + name + "。");
@@ -149,7 +159,12 @@ final class FishingJob implements MaidJob, Runnable {
       return;
     }
 
-    if (phase != JobPhase.RUNNING && !travelController.hasArrived()) {
+    if (phase == JobPhase.RUNNING && !travelController.hasArrived()) {
+      fail("钓鱼任务停止：女仆已离开钓鱼站位或不在世界中。");
+      return;
+    }
+
+    if (!travelController.hasArrived()) {
       if (!travelController.tickTravelling(PERIOD_TICKS)) {
         fail("钓鱼任务停止：女仆一直没有到达 fishing_spot/" + name + "。");
       }

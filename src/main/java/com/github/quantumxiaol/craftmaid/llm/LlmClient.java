@@ -17,6 +17,9 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -283,7 +286,13 @@ public class LlmClient {
             + "s");
 
     CompletableFuture<String> requestFuture =
-        sendWithTransientRetry(request, mode, requestId, 1, transientRetryCount);
+        sendWithTransientRetry(
+            request,
+            mode,
+            requestId,
+            1,
+            transientRetryCount,
+            System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds));
     return requestFuture
         .orTimeout(hardTimeoutSeconds, TimeUnit.SECONDS)
         .whenComplete(
@@ -306,7 +315,16 @@ public class LlmClient {
   }
 
   private CompletableFuture<String> sendWithTransientRetry(
-      HttpRequest request, String mode, String requestId, int attempt, int retriesRemaining) {
+      HttpRequest request,
+      String mode,
+      String requestId,
+      int attempt,
+      int retriesRemaining,
+      long deadlineNanos) {
+    if (System.nanoTime() >= deadlineNanos) {
+      return CompletableFuture.failedFuture(
+          new HttpTimeoutException("LLM retry deadline exceeded"));
+    }
     CompletableFuture<String> attemptFuture =
         httpClient
             .sendAsync(request, HttpResponse.BodyHandlers.ofString())
@@ -330,6 +348,13 @@ public class LlmClient {
               if (retriesRemaining <= 0 || !isRetryableMode(mode) || !isTransientFailure(cause)) {
                 return CompletableFuture.<String>failedFuture(cause);
               }
+              long delayMillis =
+                  Math.max(
+                      transientRetryDelayMillis,
+                      cause instanceof LlmApiException api ? api.retryAfterMillis : 0L);
+              if (delayMillis >= TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime())) {
+                return CompletableFuture.<String>failedFuture(cause);
+              }
 
               LOGGER.warning(
                   "LLM transient failure request_id="
@@ -339,17 +364,21 @@ public class LlmClient {
                       + " attempt="
                       + attempt
                       + " retrying_in_ms="
-                      + transientRetryDelayMillis
+                      + delayMillis
                       + " error="
                       + rootMessage(cause));
               return CompletableFuture.supplyAsync(
                       () -> null,
-                      CompletableFuture.delayedExecutor(
-                          transientRetryDelayMillis, TimeUnit.MILLISECONDS))
+                      CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS))
                   .thenCompose(
                       ignored ->
                           sendWithTransientRetry(
-                              request, mode, requestId, attempt + 1, retriesRemaining - 1));
+                              request,
+                              mode,
+                              requestId,
+                              attempt + 1,
+                              retriesRemaining - 1,
+                              deadlineNanos));
             })
         .thenCompose(future -> future);
   }
@@ -373,7 +402,7 @@ public class LlmClient {
       }
       if (cursor instanceof LlmApiException apiException) {
         int statusCode = apiException.statusCode();
-        return statusCode == 502 || statusCode == 503 || statusCode == 504;
+        return statusCode == 429 || statusCode == 502 || statusCode == 503 || statusCode == 504;
       }
       cursor = cursor.getCause();
     }
@@ -393,14 +422,17 @@ public class LlmClient {
     int statusCode = response.statusCode();
     if (statusCode < 200 || statusCode >= 300) {
       throw new LlmApiException(
-          "LLM HTTP " + statusCode + ": " + summarize(responseBody), responseBody, statusCode);
+          "LLM HTTP " + statusCode + ": " + summarize(responseBody),
+          responseBody,
+          statusCode,
+          retryAfterMillis(response.headers().firstValue("Retry-After").orElse("")));
     }
 
     JsonObject responseJson = JsonParser.parseString(responseBody).getAsJsonObject();
     if (responseJson.has("error")) {
       JsonObject error = responseJson.getAsJsonObject("error");
       String message = error.has("message") ? error.get("message").getAsString() : error.toString();
-      throw new LlmApiException(message, responseBody, statusCode);
+      throw new LlmApiException(message, responseBody, statusCode, 0L);
     }
 
     JsonArray choices = responseJson.getAsJsonArray("choices");
@@ -524,14 +556,36 @@ public class LlmClient {
     return trimmed + "/chat/completions";
   }
 
+  static long retryAfterMillis(String value) {
+    try {
+      return Math.multiplyExact(Math.max(0L, Long.parseLong(value.trim())), 1000L);
+    } catch (NumberFormatException ex) {
+      try {
+        return Math.max(
+            0L,
+            ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant()
+                    .toEpochMilli()
+                - System.currentTimeMillis());
+      } catch (DateTimeParseException ignored) {
+        return 0L;
+      }
+    } catch (ArithmeticException ex) {
+      return Long.MAX_VALUE;
+    }
+  }
+
   private static final class LlmApiException extends RuntimeException {
     private final String detectionText;
     private final int statusCode;
+    private final long retryAfterMillis;
 
-    private LlmApiException(String message, String detectionText, int statusCode) {
+    private LlmApiException(
+        String message, String detectionText, int statusCode, long retryAfterMillis) {
       super(message);
       this.detectionText = detectionText == null ? "" : detectionText;
       this.statusCode = statusCode;
+      this.retryAfterMillis = retryAfterMillis;
     }
 
     private String detectionText() {

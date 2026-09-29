@@ -103,6 +103,7 @@ mvn clean package
 ```
 
 编译完成后，将 `target/CraftMaid-1.2.5.jar` 放入服务端的 `plugins` 文件夹下。
+回归测试随 `mvn test` / `mvn clean package` 执行。
 提交代码前可以运行 `mvn spotless:apply` 自动整理 Java 格式；CI 会执行 `mvn -B spotless:check` 和 `mvn -B clean package`。
 
 ## 🚀 GitHub Actions 自动发布
@@ -143,13 +144,13 @@ maid:
     admin_can_control: false # OP/craftmaid.admin 默认只管理插件，不自动控制女仆
     guard_target_policy: "master_only" # “保护主人”默认始终保护 maid.master
   follow:
-    speed: 1.75 # Citizens Navigator 默认速度是 1.0；生存疾跑建议 1.7-2.0
+    speed: 1.75 # Citizens 基础速度的倍率，不覆盖基础速度
     update_ticks: 10
     stop_distance: 3.0
     start_distance: 8.0
     teleport_enabled: true
     teleport_distance: 128.0
-    teleport_on_stuck_seconds: 0 # 0 表示卡住时只重算路径，不自动传送
+    teleport_on_stuck_seconds: 0 # 0 表示卡住 5 秒重算路径，不自动传送
     teleport_cooldown_seconds: 30
     stuck_retry_before_teleport: 3
     stuck_teleport_min_distance: 24.0
@@ -326,7 +327,11 @@ conversation:
 * 收农田（优先使用 `farm/default`；没有 default 且只有一个可用配置时自动使用它）
 * 关闭菜单
 
+装备窗口同一时间只允许一人编辑。编辑期间装备暂存于窗口，女仆暂时卸下装备；关闭窗口后写回同一个 NPC。若 NPC 被替换或装备已被其他行为更改，窗口剩余物品退回玩家，背包放不下则掉落在脚边。编辑装备时暂时不能打开女仆背包。
+
 “打开背包”使用 Citizens 的 Inventory trait；“配置装备”使用 Citizens 的 Equipment trait，可以设置主手、副手和护甲显示。“去钓鱼 / 看住机器 / 收农田”会启动 CraftMaid 内置 Job，产物会写入女仆背包。菜单里的控制动作只允许 `maid.master` 或拥有 `craftmaid.control` 权限的玩家执行。`craftmaid.admin` 默认只负责插件管理；只有把 `maid.access.admin_can_control` 设为 `true` 时，管理员才自动获得女仆控制权。
+
+`maid.master_uuid` 可选填主人在本服务器的 UUID：填写后，权限、战斗中的主人识别和护卫对象都按 UUID 匹配，改名不影响身份；留空兼容原来的 `maid.master` 名字匹配。离线服的 UUID 仍取决于服务器的登录认证，单独填写 UUID 不提供正版认证。
 
 权限分为三层：`craftmaid.view` 默认所有玩家可用，只允许打开菜单和查看状态；`craftmaid.control` 默认不授予，用于跟随、护卫、工作、装备和锚点操作；`craftmaid.admin` 默认授予 OP，用于 reload、spawn/hide/show/refresh/remove 和历史管理。配置中的 `maid.master` 不需要额外权限，始终拥有控制权。默认 `guard_target_policy: master_only` 下，“保护主人”始终以在线的 `maid.master` 为 Sentinel 守护对象，不会把点击菜单的 OP 自动改成守护对象。
 
@@ -377,7 +382,9 @@ Job 状态和钓鱼控制：
 /craftmaid harvest stop
 ```
 
-`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物；如果存在 `anchor harvest_spot/wheat_field`，女仆会优先走到该站位，否则自动在农田外侧找安全站位。如果省略名称，命令默认使用 `main`；右键菜单和自然语言 intent 优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
+`/craftmaid fishing start main` 会读取 `anchor fishing_spot/main` 和 `region pond/main`。`/craftmaid chunk start iron_farm` 会读取 `anchor redstone_watch/iron_farm` 并加载附近 chunk。`/craftmaid harvest start wheat_field` 会读取 `region farm/wheat_field` 并收割成熟作物；如果存在 `anchor harvest_spot/wheat_field`，女仆会优先走到该站位，否则自动在农田外侧找安全站位。如果省略名称，命令、右键菜单和自然语言 intent 都优先使用 `default`，否则在只有一个可用配置时自动选择。开始钓鱼或收割会自动停止跟随；如果女仆正在护卫，会拒绝启动钓鱼或收割。ChunkKeeper 可以和 Sentinel 守点共存。当前钓鱼不会生成真实鱼钩，而是模拟等待、挥手和产出，产物会进入女仆背包；背包满时任务会自动停止。ChunkKeeper 使用 Paper plugin chunk ticket，job 运行期间会保持目标 chunk 加载，停止 job、插件 disable 或服务器关闭时会释放 ticket。
+
+跟随、护卫和需要移动的工作共用控制入口，切换前释放旧导航；菜单召回、回家也会停止工作。钓鱼离开站位后会停止产出。工作配置先检查再接管 NPC，无水或站位不安全不会打断原跟随。ChunkKeeper 无既有护卫时先走到站位再开始守点；已有护卫时只保持区块加载，状态中显示 `body=external` 和是否在场，结束加载不会停止后建立的护卫。
 
 跟随的 3-8 格默认停留区间不会追逐、不会判定卡住、不会传送；超过 `start_distance` 才重新寻路，超过 `teleport_distance` 才允许带冷却传送。`destination_teleport_margin` 保留为配置项，但 CraftMaid 会在代码里强制禁用 Citizens 内部目的地传送，避免 NPC 在玩家移动路径上碎片式闪现。
 
@@ -397,9 +404,9 @@ Job 状态和钓鱼控制：
 
 当前 action 白名单只有：`FISHING_START`、`FISHING_STOP`、`HARVEST_START`、`HARVEST_STOP`、`CHUNK_KEEPER_START`、`CHUNK_KEEPER_STOP`、`RECALL`、`FOLLOW_START`、`FOLLOW_STOP`、`GUARD_START`、`GUARD_STOP`、`GUARD_HERE`、`JOB_STOP`、`JOB_STATUS`、`INSPECT_SURROUNDINGS`。插件最多接受 2 个 action，且只允许单动作或 `STOP + START/RECALL` 的切换组合，不允许 LLM 执行 Bukkit/控制台命令。`INSPECT_SURROUNDINGS` 是只读观察 action，不能和工作、跟随、护卫、召回等 action 混用。LLM 如果输出未知 action，整轮 JSON 会被拒绝，不会显示模型在 `chat` 里的承诺文本。
 
-每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
+每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。`conversation.max_message_chars` 只截断玩家原话和存入历史的单条消息，不会截断本轮组合 prompt。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
-`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误可按 `llm.transient_retry_*` 重试，final 失败只使用本地角色回复，不会重复执行 action。执行 `/craftmaid reload` 时也会取消旧请求并忽略迟到结果。
+`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误和 HTTP 429/502/503/504 可按 `llm.transient_retry_*` 重试，final 失败只使用本地角色回复，不会重复执行 action。HTTP 重试遵守 `Retry-After` 和总超时预算。停止、新的行为命令以及 `/craftmaid reload` 会使先前在途动作计划失效；动作执行前还会在主线程检查，避免迟到结果重启任务。冷却期间会提示剩余等待时间。
 
 如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
 
@@ -455,7 +462,7 @@ NPC 生命周期管理：
 /maid follow stop
 ```
 
-清空对话历史：
+清空对话历史（需要 `craftmaid.admin` 权限，包括清空自己的历史）：
 ```
 /craftmaid forget          # 清空自己的历史
 /craftmaid forget Player   # 清空指定玩家历史
@@ -470,3 +477,5 @@ NPC 生命周期管理：
 喊过一次女仆名字后，默认 180 秒内同一玩家继续说话不需要再带名字，女仆也会接着回复。这个窗口按玩家最后一次发言滑动续期；如果想恢复成每句都必须喊名字，把 `chat.followup_seconds` 设为 `0`。
 
 多轮对话按玩家 UUID 分开保存。默认只保存在内存里，服务器重启后清空；如果你希望重启后继续沿用上下文，开启 `conversation.persist.enabled`。
+
+对话持久化采用约 1 秒合并异步写盘；重载和正常关闭会同步保存最后快照。进程异常终止可能丢失尚未写入的这一小段对话。

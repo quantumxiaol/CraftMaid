@@ -19,10 +19,11 @@ public final class MaidCombatFightbackListener implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onMasterDamaged(EntityDamageByEntityEvent event) {
-    if (!(event.getEntity() instanceof Player player)
+    if (event.getFinalDamage() <= 0
+        || !(event.getEntity() instanceof Player player)
         || !plugin.getMaidNpcService().isGuarding()
         || !plugin.getMaidCombatSettings().guardFightback().enabled()
-        || !player.getName().equalsIgnoreCase(plugin.getMasterName())) {
+        || !plugin.isMaster(player)) {
       return;
     }
 

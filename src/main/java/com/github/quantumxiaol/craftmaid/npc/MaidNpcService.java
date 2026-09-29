@@ -4,6 +4,7 @@ import com.github.quantumxiaol.craftmaid.inventory.MaidInventoryService.Inventor
 import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -33,6 +34,10 @@ public interface MaidNpcService {
 
   int getStoredNpcId();
 
+  default UUID getStoredNpcUniqueId() {
+    return null;
+  }
+
   boolean hasStoredNpc();
 
   boolean isStoredNpcSpawned();
@@ -54,6 +59,10 @@ public interface MaidNpcService {
   boolean stopFollowing();
 
   boolean isFollowing();
+
+  default Player getFollowingPlayer() {
+    return null;
+  }
 
   boolean stopMoving();
 
@@ -92,6 +101,10 @@ public interface MaidNpcService {
   boolean isGuardAvailable();
 
   boolean isGuarding();
+
+  default long guardingRevision() {
+    return 0L;
+  }
 
   boolean startGuarding(Player player);
 

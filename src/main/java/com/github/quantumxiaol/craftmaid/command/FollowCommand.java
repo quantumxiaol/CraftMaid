@@ -78,8 +78,7 @@ public final class FollowCommand implements TabExecutor {
   }
 
   private void startFollowing(Player player) {
-    plugin.getJobService().stopActiveJobForExternalControl("当前工作停止：玩家开始跟随。");
-    if (!maidNpcService.startFollowing(player)) {
+    if (!plugin.getMaidControlService().startFollowing(player)) {
       player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
       return;
     }
@@ -87,7 +86,7 @@ public final class FollowCommand implements TabExecutor {
   }
 
   private void stopFollowing(Player player) {
-    maidNpcService.stopFollowing();
+    plugin.getMaidControlService().stopFollowing();
     player.sendMessage(Component.text(plugin.getMaidName() + " 会留在这里。", NamedTextColor.GREEN));
   }
 

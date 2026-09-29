@@ -6,8 +6,9 @@ import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
 import java.util.UUID;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.scheduler.BukkitTask;
 
-final class ChunkKeeperJob implements MaidJob {
+final class ChunkKeeperJob implements MaidJob, Runnable {
   private final CraftMaid plugin;
   private final MaidJobService jobService;
   private final UUID ownerId;
@@ -18,6 +19,10 @@ final class ChunkKeeperJob implements MaidJob {
   private JobPhase phase = JobPhase.STARTING;
   private boolean stopped;
   private boolean guardStarted;
+  private long guardRevision;
+  private boolean controlsBody;
+  private JobTravelController travelController;
+  private BukkitTask task;
 
   ChunkKeeperJob(
       CraftMaid plugin, MaidJobService jobService, UUID ownerId, String name, Location watchPoint) {
@@ -50,20 +55,41 @@ final class ChunkKeeperJob implements MaidJob {
   }
 
   @Override
-  public JobActionResult start() {
+  public JobActionResult prepare() {
     World world = watchPoint.getWorld();
     if (world == null) {
       phase = JobPhase.FAILED;
       return JobActionResult.failure("redstone_watch/" + name + " 所在世界未加载。");
     }
 
-    phase = JobPhase.RUNNING;
     int radius = plugin.getChunkKeeperSettings().radiusChunks();
     tickets.addAround(watchPoint, radius);
-
     if (!plugin.getMaidNpcService().isGuarding()) {
-      plugin.getMaidNpcService().moveTo(watchPoint);
-      maybeStartGuarding();
+      Location standPoint = JobNavigationTargets.findSafeVerticalLocation(watchPoint);
+      if (standPoint == null) {
+        return JobActionResult.failure("redstone_watch/" + name + " 不是安全站位。");
+      }
+      travelController = new JobTravelController(plugin, standPoint);
+    }
+    return JobActionResult.success("看守配置已检查。");
+  }
+
+  @Override
+  public void discardPreparation() {
+    tickets.release();
+  }
+
+  @Override
+  public JobActionResult start() {
+    phase = JobPhase.RUNNING;
+    if (!plugin.getMaidNpcService().isGuarding()) {
+      if (!plugin.getMaidNpcService().moveTo(travelController.target())) {
+        phase = JobPhase.FAILED;
+        return JobActionResult.failure("无法让女仆移动到 redstone_watch/" + name + "。");
+      }
+      controlsBody = true;
+      phase = JobPhase.TRAVELLING;
+      task = plugin.getServer().getScheduler().runTaskTimer(plugin, this, 20L, 20L);
     }
     plugin
         .getJobEventBuffer()
@@ -76,8 +102,40 @@ final class ChunkKeeperJob implements MaidJob {
                 + " tickets="
                 + tickets.size()
                 + " world="
-                + world.getName());
-    return JobActionResult.success("已开始看守红石机器: " + name + "，加载 chunk 数: " + tickets.size());
+                + watchPoint.getWorld().getName());
+    return JobActionResult.success(
+        "已开始加载红石机器区块: "
+            + name
+            + "，加载 chunk 数: "
+            + tickets.size()
+            + (controlsBody ? "，女仆正在前往站位。" : "，女仆继续当前护卫，不在此处驻守。"));
+  }
+
+  @Override
+  public void run() {
+    if (stopped || !controlsBody) {
+      return;
+    }
+    if (guardStarted && guardRevision != plugin.getMaidNpcService().guardingRevision()) {
+      releaseBodyControl();
+      return;
+    }
+    if (!travelController.hasArrived()) {
+      // Sentinel owns navigation while guarding this point (including nearby combat).
+      if (!guardStarted) {
+        phase = JobPhase.TRAVELLING;
+        if (!travelController.tickTravelling(20)) {
+          stop("看守任务停止：女仆未能到达 redstone_watch/" + name + "。");
+        }
+      }
+      return;
+    }
+    if (phase == JobPhase.TRAVELLING) {
+      plugin.getMaidNpcService().stopMoving();
+      phase = JobPhase.RUNNING;
+      travelController.reset();
+      maybeStartGuarding();
+    }
   }
 
   @Override
@@ -111,7 +169,15 @@ final class ChunkKeeperJob implements MaidJob {
         + " chunks="
         + tickets.size()
         + " guard="
-        + guardStarted;
+        + guardStarted
+        + " body="
+        + (controlsBody ? "watching" : "external")
+        + " present="
+        + plugin
+            .getMaidNpcService()
+            .isNear(
+                travelController == null ? watchPoint : travelController.target(),
+                plugin.getJobNavigationSettings().arrivalDistance());
   }
 
   private void maybeStartGuarding() {
@@ -119,7 +185,8 @@ final class ChunkKeeperJob implements MaidJob {
     if (!settings.guardWithSentinel() || plugin.getMaidNpcService().isGuarding()) {
       return;
     }
-    guardStarted = plugin.getMaidNpcService().startGuardingAt(watchPoint);
+    guardStarted = plugin.getMaidNpcService().startGuardingAt(travelController.target());
+    guardRevision = plugin.getMaidNpcService().guardingRevision();
     if (!guardStarted) {
       plugin.getLogger().warning("ChunkKeeperJob 未能启动 Sentinel 守点，chunk 加载仍会继续。");
     }
@@ -128,11 +195,26 @@ final class ChunkKeeperJob implements MaidJob {
   private void stopInternal() {
     stopped = true;
     tickets.release();
-    if (guardStarted) {
-      plugin.getMaidNpcService().stopGuarding();
-      guardStarted = false;
-    }
+    releaseBodyControl();
     plugin.getJobEventBuffer().add("看守红石机器 chunk_keeper/" + name + " 停止，已释放 chunk ticket。");
     plugin.getLogger().info("ChunkKeeperJob stopped: " + name);
+  }
+
+  /** Keep chunk tickets, but relinquish navigation before another guard takes over. */
+  void releaseBodyControl() {
+    if (task != null) {
+      task.cancel();
+      task = null;
+    }
+    if (guardStarted && guardRevision == plugin.getMaidNpcService().guardingRevision()) {
+      plugin.getMaidNpcService().stopGuarding();
+    } else if (controlsBody && !guardStarted) {
+      plugin.getMaidNpcService().stopMoving();
+    }
+    guardStarted = false;
+    controlsBody = false;
+    if (!stopped) {
+      phase = JobPhase.RUNNING;
+    }
   }
 }

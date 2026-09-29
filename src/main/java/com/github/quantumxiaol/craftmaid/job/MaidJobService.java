@@ -25,6 +25,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startFishing(Player player, String name) {
+    plugin.getMaidControlService().invalidatePlans();
     Location fishingSpot =
         plugin.getAnchorService().getLocationOrNull(AnchorType.FISHING_SPOT, name);
     if (fishingSpot == null) {
@@ -40,6 +41,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startFishingAuto(Player player) {
+    plugin.getMaidControlService().invalidatePlans();
     NameSelection selection = resolveFishingName();
     if (!selection.success()) {
       return JobActionResult.failure(selection.message());
@@ -48,6 +50,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startChunkKeeper(Player player, String name) {
+    plugin.getMaidControlService().invalidatePlans();
     Location watchPoint =
         plugin.getAnchorService().getLocationOrNull(AnchorType.REDSTONE_WATCH, name);
     if (watchPoint == null) {
@@ -58,6 +61,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startChunkKeeperAuto(Player player) {
+    plugin.getMaidControlService().invalidatePlans();
     NameSelection selection =
         resolveSingleAnchorName(
             AnchorType.REDSTONE_WATCH, "redstone_watch", "/maid chunk start <name>");
@@ -68,6 +72,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startHarvest(Player player, String name) {
+    plugin.getMaidControlService().invalidatePlans();
     AnchorRegion farm = plugin.getAnchorService().getRegion(RegionType.FARM, name).orElse(null);
     if (farm == null) {
       return JobActionResult.failure("缺少完整 region farm/" + name + "。");
@@ -80,6 +85,7 @@ public final class MaidJobService {
   }
 
   public JobActionResult startHarvestAuto(Player player) {
+    plugin.getMaidControlService().invalidatePlans();
     NameSelection selection =
         resolveSingleRegionName(RegionType.FARM, "farm", "/maid harvest start <name>");
     if (!selection.success()) {
@@ -88,7 +94,7 @@ public final class MaidJobService {
     return startHarvest(player, selection.name());
   }
 
-  private JobActionResult startJob(MaidJob job) {
+  JobActionResult startJob(MaidJob job) {
     if (!plugin.getMaidNpcService().isAvailable()) {
       return JobActionResult.failure("未安装或未启用 Citizens，无法启动 " + job.type().key() + "。");
     }
@@ -101,17 +107,23 @@ public final class MaidJobService {
     if (!policy.canStart(plugin)) {
       return JobActionResult.failure(policy.blockedMessage(job.type()));
     }
-    policy.applyBeforeStart(plugin);
-    if (policy.requiresExclusiveBodyControl()
-        && !plugin.getMaidNpcService().prepareForJobControl(true)) {
-      return JobActionResult.failure("无法取得女仆 NPC 的身体控制权，请先停止护卫或重生成 NPC。");
+    JobActionResult preparation = job.prepare();
+    if (!preparation.success()) {
+      job.discardPreparation();
+      return preparation;
     }
-    if (!policy.requiresExclusiveBodyControl()) {
-      plugin.getMaidNpcService().stopMoving();
+    Player previousFollower = plugin.getMaidNpcService().getFollowingPlayer();
+    policy.applyBeforeStart(plugin);
+    if ((policy.requiresExclusiveBodyControl() || !plugin.getMaidNpcService().isGuarding())
+        && !plugin.getMaidNpcService().prepareForJobControl(true)) {
+      job.discardPreparation();
+      return JobActionResult.failure("无法取得女仆 NPC 的身体控制权，请先停止护卫或重生成 NPC。");
     }
 
     JobActionResult startResult = job.start();
     if (!startResult.success()) {
+      job.discardPreparation();
+      restoreFollowing(previousFollower);
       return startResult;
     }
     activeJob = job;
@@ -119,25 +131,22 @@ public final class MaidJobService {
   }
 
   public JobActionResult stopActiveJob(String reason) {
+    plugin.getMaidControlService().invalidatePlans();
+    String message = "已停下，之前还没开始的安排也取消了。";
     if (activeJob != null) {
       MaidJob job = activeJob;
       job.stop(reason);
-      return JobActionResult.success("已停止 " + job.type().key() + "。");
+      message = "已停止 " + job.type().key() + "。";
     }
-    if (plugin.getMaidNpcService().isFollowing()) {
-      plugin.getMaidNpcService().stopFollowing();
-      return JobActionResult.success("已停止跟随。");
+    if (plugin.getMaidNpcService().isAvailable()
+        && !plugin.getMaidNpcService().prepareForJobControl(true)) {
+      return JobActionResult.failure("工作和跟随已停止，但停止 Sentinel 行为失败，请检查日志。");
     }
-    if (plugin.getMaidNpcService().isGuarding()) {
-      if (plugin.getMaidNpcService().stopGuarding()) {
-        return JobActionResult.success("已停止护卫。");
-      }
-      return JobActionResult.failure("停止护卫失败，请检查 Sentinel 是否正常加载。");
-    }
-    return JobActionResult.failure("当前没有正在运行的 job。");
+    return JobActionResult.success(message);
   }
 
   public JobActionResult stopJob(MaidJobType type, String reason) {
+    plugin.getMaidControlService().invalidatePlans();
     if (activeJob == null || activeJob.type() != type) {
       return JobActionResult.failure("当前没有正在运行的 " + type.key() + "。");
     }
@@ -163,7 +172,20 @@ public final class MaidJobService {
     }
   }
 
+  private void restoreFollowing(Player player) {
+    if (player != null && player.isOnline()) {
+      plugin.getMaidNpcService().startFollowing(player);
+    }
+  }
+
+  public void releaseGuardControl() {
+    if (activeJob instanceof ChunkKeeperJob keeper) {
+      keeper.releaseBodyControl();
+    }
+  }
+
   public void stopJobsForGuarding(String reason) {
+    releaseGuardControl();
     if (activeJob != null && GUARD_STOPS.contains(activeJob.type())) {
       activeJob.stop(reason);
     }

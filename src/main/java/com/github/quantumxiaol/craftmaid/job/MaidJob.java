@@ -12,6 +12,12 @@ public interface MaidJob {
 
   JobPhase phase();
 
+  /** Validate and reserve resources without changing the current body controller. */
+  JobActionResult prepare();
+
+  /** Release resources reserved by prepare(), without cancelling another controller. */
+  void discardPreparation();
+
   JobActionResult start();
 
   void stop(String reason);

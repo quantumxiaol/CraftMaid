@@ -105,13 +105,25 @@ public class ChatListener implements Listener {
     }
 
     String playerSpeech = addressedByName ? stripMaidName(rawMessage, maidName) : rawMessage.trim();
+    playerSpeech = plugin.getConversationHistory().limitPlayerSpeech(playerSpeech);
     IntentSettings intentSettings = plugin.getIntentSettings();
     boolean useJsonTurn = intentSettings.enabled() && intentSettings.llmJson();
-    if (tryHandleLocalStop(player, playerSpeech)) {
+    if ((addressedByName || intentSettings.allowFollowupWindow())
+        && tryHandleLocalStop(player, playerSpeech)) {
       return;
     }
 
     if (isCoolingDown(player.getUniqueId())) {
+      long remainingSeconds =
+          Math.max(
+              1L,
+              (nextAllowedReplyAt.getOrDefault(player.getUniqueId(), 0L)
+                      - System.currentTimeMillis()
+                      + 999L)
+                  / 1000L);
+      player.sendActionBar(
+          Component.text(
+              maidName + " 请你等 " + remainingSeconds + " 秒后再说一次。", NamedTextColor.YELLOW));
       return;
     }
 
@@ -136,7 +148,12 @@ public class ChatListener implements Listener {
     String turnPlayerSpeech = playerSpeech;
 
     if (useJsonTurn) {
-      handleJsonTurn(player, turnPlayerSpeech, client, requestGeneration);
+      handleJsonTurn(
+          player,
+          turnPlayerSpeech,
+          client,
+          requestGeneration,
+          addressedByName || intentSettings.allowFollowupWindow());
       return;
     }
 
@@ -197,9 +214,14 @@ public class ChatListener implements Listener {
   }
 
   private void handleJsonTurn(
-      Player player, String playerSpeech, LlmClient client, long requestGeneration) {
+      Player player,
+      String playerSpeech,
+      LlmClient client,
+      long requestGeneration,
+      boolean allowActions) {
     UUID playerId = player.getUniqueId();
     String playerName = player.getName();
+    long controlRevision = plugin.getMaidControlService().revision();
     IntentSettings settings = plugin.getIntentSettings();
     String planPrompt = buildPlanPrompt(player, playerSpeech);
     List<ConversationMessage> conversationMessages =
@@ -252,6 +274,19 @@ public class ChatListener implements Listener {
                       clearTurn(playerId);
                       return;
                     }
+                    boolean changesBehavior =
+                        actionPlan.actions().stream()
+                            .anyMatch(action -> !action.type().isReadOnly());
+                    if (changesBehavior
+                        && (!allowActions
+                            || !plugin.getMaidControlService().isCurrent(controlRevision))) {
+                      clearTurn(playerId);
+                      player.sendMessage(
+                          Component.text(
+                              allowActions ? "女仆已收到更新的安排，先前的动作计划已取消。" : "请带上女仆名字再下达指令。",
+                              NamedTextColor.YELLOW));
+                      return;
+                    }
                     MaidActionExecutionResult actionResult =
                         actionExecutor.execute(player, actionPlan);
                     requestFinalReply(
@@ -274,6 +309,7 @@ public class ChatListener implements Listener {
       MaidActionExecutionResult actionResult,
       LlmClient client,
       long requestGeneration) {
+    long finalControlRevision = plugin.getMaidControlService().revision();
     IntentSettings settings = plugin.getIntentSettings();
     String finalPrompt = buildFinalPrompt(player, playerSpeech, actionResult);
     List<ConversationMessage> conversationMessages =
@@ -296,7 +332,14 @@ public class ChatListener implements Listener {
             String fallback = fallbackFinalReply(actionResult);
             plugin.getLogger().warning("请求动作结果回复失败: " + rootMessage(ex));
             finishTurn(
-                player, playerId, playerName, playerSpeech, fallback, client, requestGeneration);
+                player,
+                playerId,
+                playerName,
+                playerSpeech,
+                fallback,
+                client,
+                requestGeneration,
+                finalControlRevision);
             return;
           }
 
@@ -306,7 +349,14 @@ public class ChatListener implements Listener {
             finalChat = fallbackFinalReply(actionResult);
           }
           finishTurn(
-              player, playerId, playerName, playerSpeech, finalChat, client, requestGeneration);
+              player,
+              playerId,
+              playerName,
+              playerSpeech,
+              finalChat,
+              client,
+              requestGeneration,
+              finalControlRevision);
         });
   }
 
@@ -318,6 +368,19 @@ public class ChatListener implements Listener {
       String cleanReply,
       LlmClient client,
       long requestGeneration) {
+    finishTurn(
+        player, playerId, playerName, playerSpeech, cleanReply, client, requestGeneration, null);
+  }
+
+  private void finishTurn(
+      Player player,
+      UUID playerId,
+      String playerName,
+      String playerSpeech,
+      String cleanReply,
+      LlmClient client,
+      long requestGeneration,
+      Long controlRevision) {
     if (!isCurrentGeneration(requestGeneration)) {
       return;
     }
@@ -330,15 +393,21 @@ public class ChatListener implements Listener {
       return;
     }
 
-    plugin.getConversationHistory().appendExchange(playerId, playerName, playerSpeech, reply);
-    triggerMemoryCompression(playerId, client, requestGeneration);
     Bukkit.getScheduler()
         .runTask(
             plugin,
             () -> {
-              if (!plugin.isEnabled() || !player.isOnline()) {
+              if (!plugin.isEnabled()
+                  || !player.isOnline()
+                  || !isCurrentGeneration(requestGeneration)
+                  || (controlRevision != null
+                      && !plugin.getMaidControlService().isCurrent(controlRevision))) {
                 return;
               }
+              plugin
+                  .getConversationHistory()
+                  .appendExchange(playerId, playerName, playerSpeech, reply);
+              triggerMemoryCompression(playerId, client, requestGeneration);
               String prefix = plugin.getReplyPrefix().replace("{name}", plugin.getMaidName());
               Bukkit.broadcast(Component.text(prefix + reply, NamedTextColor.LIGHT_PURPLE));
             });
@@ -372,7 +441,7 @@ public class ChatListener implements Listener {
     JobActionResult result = plugin.getJobService().stopActiveJob("好的主人，我先停下手头的事。");
     player.sendMessage(
         Component.text(
-            result.success() ? result.message() : "当前没有正在运行的 job。",
+            result.message(),
             result.success() ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.YELLOW));
     return true;
   }
@@ -433,9 +502,8 @@ public class ChatListener implements Listener {
   }
 
   private String buildPlainChatPrompt(Player player, String playerSpeech) {
-    String masterName = plugin.getMasterName();
     String environmentStr = plugin.getPerceptionService().collectForPrompt(player);
-    boolean isMaster = player.getName().equalsIgnoreCase(masterName);
+    boolean isMaster = plugin.isMaster(player);
     String identityStr = isMaster ? "主人" : "其他玩家";
     return String.format(
         "当前环境：%s\n%s\n跟我说话的人是 %s (%s) 对我说：“%s”",
@@ -447,9 +515,8 @@ public class ChatListener implements Listener {
   }
 
   private String buildPlanPrompt(Player player, String playerSpeech) {
-    String masterName = plugin.getMasterName();
     String environmentStr = plugin.getPerceptionService().collectForPrompt(player);
-    boolean isMaster = player.getName().equalsIgnoreCase(masterName);
+    boolean isMaster = plugin.isMaster(player);
     String identityStr = isMaster ? "主人" : "其他玩家";
     return """
         【本轮模式】

@@ -24,6 +24,10 @@ public final class MaidIntentExecutor {
           case CHUNK_KEEPER_START -> plugin.getJobService().startChunkKeeperAuto(player);
           case HARVEST_START -> plugin.getJobService().startHarvestAuto(player);
           case JOB_STOP -> plugin.getJobService().stopActiveJob("job 已通过聊天停止。");
+          case RECALL ->
+              plugin.getMaidControlService().recall(player)
+                  ? JobActionResult.success("女仆已召回。")
+                  : JobActionResult.failure("召回女仆失败。");
         };
 
     String message =
@@ -45,6 +49,7 @@ public final class MaidIntentExecutor {
       case CHUNK_KEEPER_START -> "好的" + address + "，" + maidName + "会去看住机器。";
       case HARVEST_START -> "好的" + address + "，" + maidName + "去把成熟的作物收一下。";
       case JOB_STOP -> "好的" + address + "，" + maidName + "先停下手头的工作。";
+      case RECALL -> "好的" + address + "，" + maidName + "回来了。";
     };
   }
 
@@ -53,7 +58,7 @@ public final class MaidIntentExecutor {
   }
 
   private String addressName(Player player) {
-    if (player.getName().equalsIgnoreCase(plugin.getMasterName())) {
+    if (plugin.isMaster(player)) {
       return "主人";
     }
     return player.getName();

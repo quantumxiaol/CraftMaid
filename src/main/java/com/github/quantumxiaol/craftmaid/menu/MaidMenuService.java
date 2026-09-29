@@ -7,7 +7,10 @@ import com.github.quantumxiaol.craftmaid.anchor.MaidAnchorService.AnchorOperatio
 import com.github.quantumxiaol.craftmaid.anchor.RegionCorner;
 import com.github.quantumxiaol.craftmaid.anchor.RegionType;
 import com.github.quantumxiaol.craftmaid.job.MaidJobService.JobActionResult;
+import com.github.quantumxiaol.craftmaid.npc.MaidEquipment;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -15,9 +18,11 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -26,9 +31,13 @@ public final class MaidMenuService implements Listener {
   private static final int MENU_SIZE = 45;
 
   private final CraftMaid plugin;
+  private final MaidEquipmentEditor equipmentEditor;
+  private MaidEquipmentHolder equipmentHolder;
+  private Player equipmentPlayer;
 
   public MaidMenuService(CraftMaid plugin) {
     this.plugin = plugin;
+    this.equipmentEditor = new MaidEquipmentEditor(plugin.getMaidNpcService());
   }
 
   public void openFor(Player player) {
@@ -266,7 +275,13 @@ public final class MaidMenuService implements Listener {
       return;
     }
 
-    if (!(topInventory.getHolder() instanceof MaidEquipmentHolder)) {
+    if (!(topInventory.getHolder() instanceof MaidEquipmentHolder holder)) {
+      return;
+    }
+
+    if (!equipmentEditor.owns(holder.session())
+        || !holder.session().playerId().equals(event.getWhoClicked().getUniqueId())) {
+      event.setCancelled(true);
       return;
     }
 
@@ -293,11 +308,66 @@ public final class MaidMenuService implements Listener {
       return;
     }
 
-    boolean saved = plugin.getMaidNpcService().setEquipment(holder.readEquipment());
+    finishEquipmentEdit(holder, player);
+  }
+
+  @EventHandler
+  public void onPlayerQuit(PlayerQuitEvent event) {
+    if (event.getPlayer().equals(equipmentPlayer)) {
+      closeEquipmentEditor();
+    }
+  }
+
+  public void closeEquipmentEditor() {
+    MaidEquipmentHolder holder = equipmentHolder;
+    Player player = equipmentPlayer;
+    if (holder == null || player == null) {
+      return;
+    }
+    if (player.getOpenInventory().getTopInventory() == holder.getInventory()) {
+      player.closeInventory();
+    }
+    // Also settle if InventoryOpenEvent was cancelled, or no close event was delivered.
+    finishEquipmentEdit(holder, player);
+  }
+
+  public boolean isEquipmentEditing() {
+    return equipmentEditor.isEditing();
+  }
+
+  private void finishEquipmentEdit(MaidEquipmentHolder holder, Player player) {
+    if (!equipmentEditor.owns(holder.session())
+        || !holder.session().playerId().equals(player.getUniqueId())) {
+      return;
+    }
+    MaidEquipment remaining = holder.readEquipment();
+    boolean saved = equipmentEditor.finish(holder.session(), remaining);
+    holder.clearEquipment();
+    equipmentHolder = null;
+    equipmentPlayer = null;
     if (saved) {
       player.sendMessage(Component.text(plugin.getMaidName() + " 的装备已保存。", NamedTextColor.GREEN));
     } else {
-      player.sendMessage(Component.text("保存女仆装备失败，请确认 Citizens 是否正常加载。", NamedTextColor.RED));
+      for (ItemStack item :
+          Arrays.asList(
+              remaining.mainHand(),
+              remaining.offHand(),
+              remaining.helmet(),
+              remaining.chestplate(),
+              remaining.leggings(),
+              remaining.boots())) {
+        if (item == null) {
+          continue;
+        }
+        player
+            .getInventory()
+            .addItem(item)
+            .values()
+            .forEach(
+                overflow -> player.getWorld().dropItemNaturally(player.getLocation(), overflow));
+      }
+      player.sendMessage(
+          Component.text("女仆已不可用或装备发生变化，窗口中剩余装备已退回；背包放不下的物品掉落在脚边。", NamedTextColor.YELLOW));
     }
   }
 
@@ -341,7 +411,12 @@ public final class MaidMenuService implements Listener {
   }
 
   private void handleEquipmentClick(InventoryClickEvent event, Inventory topInventory) {
-    if (event.isShiftClick()) {
+    MaidEquipmentHolder holder = (MaidEquipmentHolder) topInventory.getHolder();
+    if (!equipmentEditor.owns(holder.session())
+        || !Objects.equals(holder.session().playerId(), event.getWhoClicked().getUniqueId())
+        || event.isShiftClick()
+        || event.getAction() == InventoryAction.COLLECT_TO_CURSOR
+        || event.getAction() == InventoryAction.CLONE_STACK) {
       event.setCancelled(true);
       return;
     }
@@ -441,7 +516,7 @@ public final class MaidMenuService implements Listener {
       return;
     }
 
-    boolean moved = plugin.getMaidNpcService().spawnAt(player, plugin.getMaidName());
+    boolean moved = plugin.getMaidControlService().recall(player);
     if (!moved) {
       player.sendMessage(Component.text("召回女仆失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
       return;
@@ -470,7 +545,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    boolean returned = plugin.getMaidNpcService().returnHome();
+    boolean returned = plugin.getMaidControlService().returnHome();
     if (!returned) {
       player.sendMessage(
           Component.text("还没有设置 home/default，先在菜单里点“设置 home”。", NamedTextColor.YELLOW));
@@ -501,6 +576,13 @@ public final class MaidMenuService implements Listener {
         .runTask(
             plugin,
             () -> {
+              if (!player.isOnline() || !plugin.isEnabled() || !ensureControlAllowed(player)) {
+                return;
+              }
+              if (equipmentEditor.isEditing()) {
+                player.sendMessage(Component.text("请等装备编辑结束后再打开女仆背包。", NamedTextColor.YELLOW));
+                return;
+              }
               boolean opened = plugin.getMaidNpcService().openInventory(player);
               if (!opened) {
                 player.sendMessage(
@@ -519,15 +601,29 @@ public final class MaidMenuService implements Listener {
         .runTask(
             plugin,
             () -> {
-              MaidEquipmentHolder holder = new MaidEquipmentHolder();
+              if (!player.isOnline() || !plugin.isEnabled() || !ensureControlAllowed(player)) {
+                return;
+              }
+              MaidEquipmentEditor.Session session = equipmentEditor.begin(player.getUniqueId());
+              if (session == null) {
+                player.sendMessage(Component.text("装备正在被编辑，或女仆尚未生成，请稍后再试。", NamedTextColor.YELLOW));
+                return;
+              }
+              MaidEquipmentHolder holder = new MaidEquipmentHolder(session);
               Inventory inventory =
                   Bukkit.createInventory(
                       holder,
                       MaidEquipmentHolder.SIZE,
                       Component.text(plugin.getMaidName() + "的装备"));
               holder.setInventory(inventory);
-              holder.populate(plugin.getMaidNpcService().getEquipment());
+              holder.populate(session.equipment());
+              equipmentHolder = holder;
+              equipmentPlayer = player;
               player.openInventory(inventory);
+              if (player.getOpenInventory().getTopInventory() != inventory) {
+                finishEquipmentEdit(holder, player);
+                return;
+              }
               player.sendMessage(Component.text("把装备放入对应槽位，关闭窗口后保存。", NamedTextColor.GRAY));
             });
   }
@@ -550,8 +646,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    plugin.getJobService().stopActiveJobForExternalControl("当前工作停止：玩家开始跟随。");
-    boolean started = plugin.getMaidNpcService().startFollowing(player);
+    boolean started = plugin.getMaidControlService().startFollowing(player);
     if (!started) {
       player.sendMessage(Component.text("启动跟随失败，请检查 Citizens 是否正常加载。", NamedTextColor.RED));
       return;
@@ -564,7 +659,7 @@ public final class MaidMenuService implements Listener {
     if (!ensureControlAllowed(player) || !ensureNpcAvailable(player)) {
       return;
     }
-    plugin.getMaidNpcService().stopFollowing();
+    plugin.getMaidControlService().stopFollowing();
     player.closeInventory();
     player.sendMessage(Component.text(plugin.getMaidName() + " 会留在这里。", NamedTextColor.GREEN));
   }
@@ -604,8 +699,7 @@ public final class MaidMenuService implements Listener {
       player.sendMessage(Component.text("主人当前不在线，无法开始保护主人。", NamedTextColor.YELLOW));
       return;
     }
-    plugin.getJobService().stopJobsForGuarding("当前工作停止：玩家开始护卫。");
-    boolean started = plugin.getMaidNpcService().startGuarding(guardTarget);
+    boolean started = plugin.getMaidControlService().startGuarding(guardTarget);
     if (!started) {
       player.sendMessage(Component.text("启动护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
       return;
@@ -620,7 +714,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
-    boolean stopped = plugin.getMaidNpcService().stopGuarding();
+    boolean stopped = plugin.getMaidControlService().stopGuarding();
     if (!stopped) {
       player.sendMessage(Component.text("停止护卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
       return;
@@ -635,8 +729,7 @@ public final class MaidMenuService implements Listener {
         || !ensureSentinelAvailable(player)) {
       return;
     }
-    plugin.getJobService().stopJobsForGuarding("当前工作停止：玩家开始守卫。");
-    boolean started = plugin.getMaidNpcService().startGuardingHere(player);
+    boolean started = plugin.getMaidControlService().startGuardingHere(player);
     if (!started) {
       player.sendMessage(Component.text("启动守卫失败，请检查 Sentinel 是否正常加载。", NamedTextColor.RED));
       return;

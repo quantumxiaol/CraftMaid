@@ -47,7 +47,10 @@ public final class MaidDamagePolicyListener implements Listener {
     Entity attacker = resolveAttacker(event.getDamager());
 
     if (plugin.getMaidNpcService().isMaidEntity(victim) && attacker instanceof Player player) {
-      handleMaidDamagedByPlayer(event, player);
+      // Damage enforcement below still runs on cancelled events; retaliation must not.
+      if (!event.isCancelled() && event.getFinalDamage() > 0.0) {
+        handleMaidDamagedByPlayer(event, player);
+      }
       return;
     }
 
@@ -124,7 +127,7 @@ public final class MaidDamagePolicyListener implements Listener {
   }
 
   private boolean isMaster(Player player) {
-    return player.getName().equalsIgnoreCase(plugin.getMasterName());
+    return plugin.isMaster(player);
   }
 
   private Entity resolveAttacker(Entity damager) {

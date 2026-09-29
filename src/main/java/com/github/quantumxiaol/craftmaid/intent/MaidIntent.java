@@ -4,7 +4,8 @@ public enum MaidIntent {
   FISHING_START("fishing_start"),
   CHUNK_KEEPER_START("chunk_keeper_start"),
   HARVEST_START("harvest_start"),
-  JOB_STOP("job_stop");
+  JOB_STOP("job_stop"),
+  RECALL("recall");
 
   private final String key;
 

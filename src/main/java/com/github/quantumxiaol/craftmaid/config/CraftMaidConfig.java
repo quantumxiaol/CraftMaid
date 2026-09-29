@@ -2,6 +2,7 @@ package com.github.quantumxiaol.craftmaid.config;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public record CraftMaidConfig(
@@ -93,6 +94,7 @@ public record CraftMaidConfig(
         new MaidSettings(
             getConfigString(plugin, "maid.name", "露西"),
             getConfigString(plugin, "maid.master", "PlayerName"),
+            parseMasterUuid(plugin),
             getConfigString(plugin, "maid.language", "中文"),
             getConfigString(plugin, "maid.skin", "master"),
             new AccessSettings(
@@ -368,11 +370,29 @@ public record CraftMaidConfig(
   public record MaidSettings(
       String name,
       String master,
+      UUID masterUuid,
       String language,
       String skin,
       AccessSettings access,
       FollowSettings follow,
       CombatSettings combat) {}
+
+  private static UUID parseMasterUuid(JavaPlugin plugin) {
+    String value = getConfigString(plugin, "maid.master_uuid", "").trim();
+    if (value.isEmpty()) {
+      return null;
+    }
+    try {
+      UUID id = UUID.fromString(value);
+      if (!id.toString().equalsIgnoreCase(value)) {
+        throw new IllegalArgumentException("Non-canonical UUID");
+      }
+      return id;
+    } catch (IllegalArgumentException ex) {
+      plugin.getLogger().severe("maid.master_uuid 格式无效，已禁用主人身份匹配；请填写完整 UUID 或留空。");
+      return new UUID(0L, 0L);
+    }
+  }
 
   public record AccessSettings(boolean adminCanControl, String guardTargetPolicy) {}
 

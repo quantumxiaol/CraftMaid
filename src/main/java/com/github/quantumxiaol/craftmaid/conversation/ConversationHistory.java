@@ -21,6 +21,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class ConversationHistory {
   private final CraftMaid plugin;
@@ -29,6 +33,16 @@ public class ConversationHistory {
   private final Map<UUID, String> memorySummaries = new HashMap<>();
   private final Map<UUID, String> playerNames = new HashMap<>();
   private final Set<UUID> compressingPlayers = new HashSet<>();
+  private final Object persistenceLock = new Object();
+  private final ScheduledExecutorService persistenceExecutor =
+      Executors.newSingleThreadScheduledExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "CraftMaid-history");
+            thread.setDaemon(true);
+            return thread;
+          });
+  private ScheduledFuture<?> pendingSave;
+  private boolean closed;
 
   private boolean enabled = true;
   private boolean persistEnabled;
@@ -69,7 +83,9 @@ public class ConversationHistory {
 
   public synchronized List<ConversationMessage> buildPromptMessages(
       UUID playerId, String currentUserPrompt) {
-    ConversationMessage currentMessage = ConversationMessage.user(trimContent(currentUserPrompt));
+    // The current prompt includes trusted context and action results, not just player speech.
+    ConversationMessage currentMessage =
+        ConversationMessage.user(currentUserPrompt == null ? "" : currentUserPrompt);
     if (!enabled) {
       return List.of(currentMessage);
     }
@@ -107,7 +123,7 @@ public class ConversationHistory {
     addMessage(history, ConversationMessage.assistant(assistantReply));
     playerNames.put(playerId, playerName);
 
-    save();
+    scheduleSave();
   }
 
   public synchronized CompressionRequest prepareCompression(UUID playerId) {
@@ -151,7 +167,7 @@ public class ConversationHistory {
     if (history == null || history.isEmpty()) {
       memorySummaries.put(request.playerId(), trimmedSummary);
       playerNames.put(request.playerId(), request.playerName());
-      save();
+      scheduleSave();
       return;
     }
 
@@ -161,7 +177,7 @@ public class ConversationHistory {
     }
     memorySummaries.put(request.playerId(), trimmedSummary);
     playerNames.put(request.playerId(), request.playerName());
-    save();
+    scheduleSave();
   }
 
   public synchronized void cancelCompression(UUID playerId) {
@@ -174,7 +190,7 @@ public class ConversationHistory {
     playerNames.remove(playerId);
     compressingPlayers.remove(playerId);
     if (removed) {
-      save();
+      scheduleSave();
     }
     return removed;
   }
@@ -210,7 +226,7 @@ public class ConversationHistory {
     playerNames.clear();
     compressingPlayers.clear();
     if (count > 0) {
-      save();
+      scheduleSave();
     }
     return count;
   }
@@ -220,22 +236,56 @@ public class ConversationHistory {
     return history == null ? 0 : history.size();
   }
 
-  public synchronized void save() {
-    if (!persistEnabled) {
+  private void scheduleSave() {
+    if (!persistEnabled || closed || pendingSave != null) {
       return;
     }
+    pendingSave =
+        persistenceExecutor.schedule(
+            () -> {
+              synchronized (this) {
+                pendingSave = null;
+              }
+              save();
+            },
+            1,
+            TimeUnit.SECONDS);
+  }
 
-    try {
-      Files.createDirectories(persistPath.getParent());
-      Path tempPath = persistPath.resolveSibling(persistPath.getFileName() + ".tmp");
-      Files.writeString(tempPath, gson.toJson(toJson()), StandardCharsets.UTF_8);
-      Files.move(
-          tempPath,
-          persistPath,
-          StandardCopyOption.REPLACE_EXISTING,
-          StandardCopyOption.ATOMIC_MOVE);
-    } catch (IOException ex) {
-      plugin.getLogger().warning("保存对话历史失败: " + ex.getMessage());
+  public void shutdown() {
+    synchronized (this) {
+      closed = true;
+      if (pendingSave != null) {
+        pendingSave.cancel(false);
+        pendingSave = null;
+      }
+    }
+    persistenceExecutor.shutdown();
+    save();
+  }
+
+  public void save() {
+    // Serialize writers, but release the history lock before filesystem I/O.
+    synchronized (persistenceLock) {
+      JsonObject snapshot;
+      Path path;
+      synchronized (this) {
+        if (!persistEnabled) {
+          return;
+        }
+        snapshot = toJson();
+        path = persistPath;
+      }
+
+      try {
+        Files.createDirectories(path.getParent());
+        Path tempPath = path.resolveSibling(path.getFileName() + ".tmp");
+        Files.writeString(tempPath, gson.toJson(snapshot), StandardCharsets.UTF_8);
+        Files.move(
+            tempPath, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      } catch (IOException ex) {
+        plugin.getLogger().warning("保存对话历史失败: " + ex.getMessage());
+      }
     }
   }
 
@@ -361,6 +411,10 @@ public class ConversationHistory {
       return trimmed;
     }
     return "（更早的记忆过长，已保留较新的压缩片段。）\n" + trimmed.substring(trimmed.length() - maxMemoryChars);
+  }
+
+  public synchronized String limitPlayerSpeech(String speech) {
+    return trimContent(speech);
   }
 
   private String trimContent(String content) {
