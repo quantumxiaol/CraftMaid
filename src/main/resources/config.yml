@@ -3,11 +3,15 @@ llm:
   base_url: "https://api.deepseek.com"
   api_key: "your-api-key-here"
   model_name: "deepseek-v4-flash"
+  # auto：对官方 DeepSeek Flash/V4 显式关闭思考，其他接口不加供应商参数。
+  # enabled / disabled：显式发送 thinking.type；provider：完全使用接口默认行为。
+  # 旧配置缺省为 auto；想保留推理可设为 enabled，并留足输出 token。
+  thinking_mode: auto
   # 单次 HTTP 请求超时；hard_timeout_seconds 是整次 LLM 调用的最终兜底。
   timeout_seconds: 30
   hard_timeout_seconds: 40
   # 仅 plan/chat/memory 在连接重置、超时或 HTTP 429/502/503/504 时重试；遵守 Retry-After。
-  # final 失败使用本地回复，不会重复执行动作。
+  # final 用正文回复；空正文最多重试一次，仍失败使用本地回复，不会重复执行动作。
   transient_retry_count: 1
   transient_retry_delay_millis: 500
   temperature: 0.7
@@ -228,7 +232,8 @@ intent:
   allow_followup_window: true
   # true 时普通聊天和工作控制统一走 JSON：{chat, actions}。
   llm_json: true
-  # DeepSeek 和 OpenAI GPT 可用；不兼容接口会自动重试不带 response_format，并在本次运行中降级。
+  # 仅 PLAN 使用；不支持或返回空正文时本次运行降级为 prompt-only JSON，reload 重置。
+  # FINAL 直接生成正文，不使用 JSON 输出模式。
   response_format_json_object: true
   # 这里限制的是模型输出 token，不限制输入里的 system prompt / 历史 / 环境上下文。
   plan_max_tokens: 1024

@@ -17,12 +17,44 @@ public final class MaidActionPlanParser {
 
     try {
       JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+      if (!root.has("chat")
+          || !root.get("chat").isJsonPrimitive()
+          || !root.getAsJsonPrimitive("chat").isString()
+          || !root.has("actions")
+          || !root.get("actions").isJsonArray()) {
+        return Optional.empty();
+      }
       String chat = stringOrBlank(root, "chat");
       List<MaidAction> actions = parseActions(root.get("actions"));
       return Optional.of(new MaidActionPlan(chat, actions));
     } catch (RuntimeException ex) {
       return Optional.empty();
     }
+  }
+
+  public boolean isValidPlan(String raw) {
+    return parse(raw).filter(plan -> plan.hasActions() || !plan.chat().isBlank()).isPresent();
+  }
+
+  /** FINAL is display-only. A legacy JSON envelope is tolerated but can never execute actions. */
+  public Optional<String> parseFinalReply(String raw) {
+    if (raw == null || raw.isBlank()) return Optional.empty();
+    String text = raw.trim();
+    if (text.startsWith("<think>") || text.startsWith("<analysis>")) return Optional.empty();
+    boolean looksLikeArray = text.matches("(?s)^\\[\\s*[\\{\\[\\]\"].*");
+    if (text.startsWith("{") || looksLikeArray || text.startsWith("```")) {
+      try {
+        JsonObject root = JsonParser.parseString(extractJsonObject(text)).getAsJsonObject();
+        JsonElement chat = root.get("chat");
+        if (chat == null || !chat.isJsonPrimitive() || !chat.getAsJsonPrimitive().isString()) {
+          return Optional.empty();
+        }
+        return Optional.of(chat.getAsString().trim()).filter(value -> !value.isBlank());
+      } catch (RuntimeException ex) {
+        return Optional.empty();
+      }
+    }
+    return Optional.of(text);
   }
 
   private List<MaidAction> parseActions(JsonElement actionsElement) {

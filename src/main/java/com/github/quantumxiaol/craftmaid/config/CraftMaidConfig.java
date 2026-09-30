@@ -88,7 +88,8 @@ public record CraftMaidConfig(
             Math.max(1, plugin.getConfig().getInt("llm.timeout_seconds", 30)),
             Math.max(1, plugin.getConfig().getInt("llm.hard_timeout_seconds", 40)),
             Math.max(0, plugin.getConfig().getInt("llm.transient_retry_count", 1)),
-            Math.max(0, plugin.getConfig().getInt("llm.transient_retry_delay_millis", 500)));
+            Math.max(0, plugin.getConfig().getInt("llm.transient_retry_delay_millis", 500)),
+            getConfigString(plugin, "llm.thinking_mode", "auto"));
 
     MaidSettings maid =
         new MaidSettings(
@@ -365,7 +366,8 @@ public record CraftMaidConfig(
       int timeoutSeconds,
       int hardTimeoutSeconds,
       int transientRetryCount,
-      int transientRetryDelayMillis) {}
+      int transientRetryDelayMillis,
+      String thinkingMode) {}
 
   public record MaidSettings(
       String name,

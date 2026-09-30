@@ -18,6 +18,7 @@ import com.github.quantumxiaol.craftmaid.perception.MaidPerceptionService;
 import com.github.quantumxiaol.craftmaid.vision.MaidVisionService;
 import com.github.quantumxiaol.craftmaid.vision.VisionObservation;
 import com.github.quantumxiaol.craftmaid.vision.VisionSettings;
+import com.google.gson.JsonParser;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,7 +79,7 @@ class ChatVisionTest {
     when(history.buildPromptMessages(any(), anyString(), anyList()))
         .thenAnswer(
             call -> List.of(ConversationMessage.user(call.getArgument(1), call.getArgument(2))));
-    when(llm.askJsonAsync(anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("final")))
+    when(llm.askFinalAsync(anyString(), anyList(), anyInt(), anyDouble()))
         .thenAnswer(
             call -> {
               finalMessages.add(List.copyOf(call.getArgument(1)));
@@ -126,6 +127,57 @@ class ChatVisionTest {
     assertFalse(current.content().contains("旧位置有石头"));
     assertFalse(current.content().contains("已经移动"));
     verify(perception, times(1)).inspectSurroundings(player);
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "主人，前面是铁块外墙和玻璃窗，看起来是房子。",
+        "{\"chat\":\"主人，前面是铁块外墙和玻璃窗，看起来是房子。\",\"actions\":[{\"type\":\"GUARD_START\"}]}"
+      })
+  void finalDisplaysActualDescriptionAndNeverRunsASecondAction(String raw) throws Exception {
+    plan("{\"chat\":\"\",\"actions\":[{\"type\":\"INSPECT_SURROUNDINGS\"}]}");
+    completeCapture();
+    replies.getFirst().complete(raw);
+    drain();
+    verify(plugin.getConversationHistory())
+        .appendExchange(
+            eq(player.getUniqueId()), eq("player"), anyString(), eq("主人，前面是铁块外墙和玻璃窗，看起来是房子。"));
+    verifyNoInteractions(executors.constructed().getFirst());
+    verify(vision, times(1)).captureForLlm(any());
+  }
+
+  @Test
+  void planHistoryUsesJsonExamplesWithoutChangingStoredText() throws Exception {
+    String stored = "主人，我在呢，\"光钻\"听着。";
+    var old = ConversationMessage.assistant(stored);
+    when(plugin.getConversationHistory().buildPromptMessages(any(), anyString()))
+        .thenAnswer(call -> List.of(old, ConversationMessage.user(call.getArgument(1))));
+    plan("{\"chat\":\"你好\",\"actions\":[]}");
+    verify(llm)
+        .askJsonAsync(
+            anyString(),
+            argThat(
+                messages -> {
+                  var json =
+                      JsonParser.parseString(messages.getFirst().content()).getAsJsonObject();
+                  return json.get("chat").getAsString().equals(stored)
+                      && json.getAsJsonArray("actions").isEmpty();
+                }),
+            anyInt(),
+            anyDouble(),
+            anyBoolean(),
+            eq("plan"),
+            any());
+    assertEquals(stored, old.content());
+    verifyNoInteractions(vision);
+  }
+
+  @Test
+  void invalidPlanNeverReachesTheExecutor() throws Exception {
+    plan("主人，我马上跟着你。");
+    verifyNoInteractions(executors.constructed().getFirst());
+    assertTrue(finalMessages.isEmpty());
   }
 
   @ParameterizedTest
@@ -190,7 +242,8 @@ class ChatVisionTest {
             anyInt(),
             anyDouble(),
             anyBoolean(),
-            eq("plan"));
+            eq("plan"),
+            any());
   }
 
   @Test
@@ -205,7 +258,8 @@ class ChatVisionTest {
   }
 
   private void plan(String json) throws Exception {
-    when(llm.askJsonAsync(anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("plan")))
+    when(llm.askJsonAsync(
+            anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("plan"), any()))
         .thenReturn(CompletableFuture.completedFuture(json));
     var method =
         ChatListener.class.getDeclaredMethod(

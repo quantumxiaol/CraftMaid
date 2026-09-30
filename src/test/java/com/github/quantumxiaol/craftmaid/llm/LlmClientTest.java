@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import com.github.quantumxiaol.craftmaid.conversation.ConversationImage;
 import com.github.quantumxiaol.craftmaid.conversation.ConversationMessage;
+import com.github.quantumxiaol.craftmaid.intent.MaidActionPlanParser;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.net.http.HttpClient;
@@ -23,8 +24,146 @@ import org.mockito.ArgumentCaptor;
 
 class LlmClientTest {
   @ParameterizedTest
+  @CsvSource({
+    "https://api.deepseek.com,deepseek-v4-flash,auto,disabled",
+    "https://api.deepseek.com/v1,deepseek-flash,auto,disabled",
+    "https://api.deepseek.com,deepseek-v4-pro,auto,disabled",
+    "https://api.deepseek.com,deepseek-reasoner,auto,absent",
+    "https://api.deepseek.com,deepseek-flash,enabled,enabled",
+    "https://api.deepseek.com,deepseek-flash,provider,absent",
+    "https://example.com,deepseek-flash,auto,absent",
+    "https://api.deepseek.com.example.com,deepseek-flash,auto,absent",
+    "https://example.com,deepseek-flash,disabled,disabled"
+  })
+  void thinkingControlIsExplicitAndAutoOnlyAppliesToOfficialDeepSeek(
+      String url, String model, String mode, String expected) throws Exception {
+    var http = mock(HttpClient.class);
+    var builder = mock(HttpClient.Builder.class, RETURNS_SELF);
+    when(builder.build()).thenReturn(http);
+    var success = response(200, "{\"choices\":[{\"message\":{\"content\":\"收到\"}}]}", "");
+    when(http.sendAsync(
+            any(HttpRequest.class),
+            org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+        .thenReturn(CompletableFuture.completedFuture(success));
+    try (var clients = mockStatic(HttpClient.class)) {
+      clients.when(HttpClient::newBuilder).thenReturn(builder);
+      var client = new LlmClient(url, "", model, .2, 50, 2, 3, 0, 0, mode);
+      assertEquals(
+          "收到",
+          client.askFinalAsync("reply", List.of(ConversationMessage.user("你好")), 50, .2).join());
+      var requests = ArgumentCaptor.forClass(HttpRequest.class);
+      verify(http)
+          .sendAsync(
+              requests.capture(),
+              org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+      var payload = body(requests.getValue());
+      assertFalse(payload.has("response_format"));
+      if (expected.equals("absent")) assertFalse(payload.has("thinking"));
+      else assertEquals(expected, payload.getAsJsonObject("thinking").get("type").getAsString());
+    }
+  }
+
+  @Test
+  void finalRetriesEmptyContentAsPlainTextKeepingTheSameImages() throws Exception {
+    var http = mock(HttpClient.class);
+    var builder = mock(HttpClient.Builder.class, RETURNS_SELF);
+    when(builder.build()).thenReturn(http);
+    var empty =
+        response(
+            200,
+            "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\" \",\"reasoning_content\":\"private\"}}]}",
+            "");
+    var success =
+        response(200, "{\"choices\":[{\"message\":{\"content\":\"主人，我看见铁块墙和玻璃窗。\"}}]}", "");
+    when(http.sendAsync(
+            any(HttpRequest.class),
+            org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+        .thenReturn(
+            CompletableFuture.completedFuture(empty), CompletableFuture.completedFuture(success));
+    try (var clients = mockStatic(HttpClient.class)) {
+      clients.when(HttpClient::newBuilder).thenReturn(builder);
+      var client =
+          new LlmClient("https://api.deepseek.com", "", "deepseek-v4-flash", .2, 50, 2, 3, 0, 0);
+      var images =
+          List.of("NORTH", "EAST", "SOUTH", "WEST").stream()
+              .map(label -> ConversationImage.png(label, new byte[] {1, 2, 3}))
+              .toList();
+      assertEquals(
+          "主人，我看见铁块墙和玻璃窗。",
+          client
+              .askFinalAsync("直接回复", List.of(ConversationMessage.user("这是什么建筑", images)), 50, .2)
+              .join());
+      var requests = ArgumentCaptor.forClass(HttpRequest.class);
+      verify(http, times(2))
+          .sendAsync(
+              requests.capture(),
+              org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+      var first = body(requests.getAllValues().getFirst());
+      var retry = body(requests.getAllValues().getLast());
+      assertFalse(first.has("response_format"));
+      assertFalse(retry.has("response_format"));
+      assertEquals(
+          first.getAsJsonArray("messages").get(1), retry.getAsJsonArray("messages").get(1));
+      assertEquals(
+          9,
+          retry
+              .getAsJsonArray("messages")
+              .get(1)
+              .getAsJsonObject()
+              .getAsJsonArray("content")
+              .size());
+      assertFalse(retry.toString().contains("private"));
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"false,true", "false,false", "true,true", "true,false"})
+  void planRepairsInvalidContentAtMostOnceAndValidatesTheRepair(
+      boolean firstEmpty, boolean repairValid) {
+    var http = mock(HttpClient.class);
+    var builder = mock(HttpClient.Builder.class, RETURNS_SELF);
+    when(builder.build()).thenReturn(http);
+    String valid = "{\"chat\":\"\",\"actions\":[{\"type\":\"FOLLOW_START\"}]}";
+    JsonObject message = new JsonObject();
+    message.addProperty("content", firstEmpty ? " " : "主人，我可以跟随你。");
+    var first = response(200, "{\"choices\":[{\"message\":" + message + "}]}", "");
+    message.addProperty(
+        "content",
+        repairValid ? valid : "{\"chat\":\"\",\"actions\":[{\"type\":\"RUN_COMMAND\"}]}");
+    var second = response(200, "{\"choices\":[{\"message\":" + message + "}]}", "");
+    when(http.sendAsync(
+            any(HttpRequest.class),
+            org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+        .thenReturn(
+            CompletableFuture.completedFuture(first), CompletableFuture.completedFuture(second));
+    try (var clients = mockStatic(HttpClient.class)) {
+      clients.when(HttpClient::newBuilder).thenReturn(builder);
+      var client = new LlmClient("http://localhost/v1", "", "test", .2, 50, 2, 3, 2, 0);
+      var future =
+          client.askJsonAsync(
+              "JSON protocol",
+              List.of(ConversationMessage.user("跟着我")),
+              50,
+              .2,
+              true,
+              "plan",
+              new MaidActionPlanParser()::isValidPlan);
+      if (repairValid) assertEquals(valid, future.join());
+      else {
+        var failure = assertThrows(CompletionException.class, future::join);
+        assertTrue(failure.getCause().getMessage().contains("chat/actions"));
+        assertFalse(failure.getCause().getMessage().contains("RUN_COMMAND"));
+      }
+      verify(http, times(2))
+          .sendAsync(
+              any(HttpRequest.class),
+              org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+    }
+  }
+
+  @ParameterizedTest
   @CsvSource({"plan,true", "plan,false", "final,true", "final,false"})
-  void emptyJsonReplyRetriesOnceWithoutLosingImagesOrDisablingFutureJsonMode(
+  void emptyJsonReplyRetriesOnceAndRemembersBrokenJsonModeWithoutLosingImages(
       String mode, boolean jsonFormat) throws Exception {
     var http = mock(HttpClient.class);
     var builder = mock(HttpClient.Builder.class, RETURNS_SELF);
@@ -68,7 +207,7 @@ class LlmClientTest {
       var retry = body(requests.getAllValues().get(1));
       assertEquals(jsonFormat, first.has("response_format"));
       assertFalse(retry.has("response_format"));
-      assertTrue(body(requests.getAllValues().get(2)).has("response_format"));
+      assertEquals(!jsonFormat, body(requests.getAllValues().get(2)).has("response_format"));
       assertEquals(
           first.getAsJsonArray("messages").get(1), retry.getAsJsonArray("messages").get(1));
       assertFalse(retry.toString().contains("private reasoning"));
@@ -159,7 +298,8 @@ class LlmClientTest {
         JsonObject body = body(requests.getAllValues().get(attempt));
         assertEquals(attempt == 0, body.has("response_format"));
         var messages = body.getAsJsonArray("messages");
-        assertEquals("system", messages.get(0).getAsJsonObject().get("content").getAsString());
+        assertTrue(
+            messages.get(0).getAsJsonObject().get("content").getAsString().startsWith("system"));
         assertEquals("old", messages.get(1).getAsJsonObject().get("content").getAsString());
         var content = messages.get(2).getAsJsonObject().getAsJsonArray("content");
         assertEquals(9, content.size());

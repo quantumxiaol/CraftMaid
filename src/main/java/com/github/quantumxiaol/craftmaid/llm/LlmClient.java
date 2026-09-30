@@ -26,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 public class LlmClient {
@@ -62,6 +63,7 @@ public class LlmClient {
   private final int hardTimeoutSeconds;
   private final int transientRetryCount;
   private final int transientRetryDelayMillis;
+  private final String thinkingMode;
   private volatile boolean responseFormatUnsupported;
 
   public LlmClient(
@@ -74,6 +76,30 @@ public class LlmClient {
       int hardTimeoutSeconds,
       int transientRetryCount,
       int transientRetryDelayMillis) {
+    this(
+        apiUrl,
+        apiKey,
+        modelName,
+        temperature,
+        maxTokens,
+        timeoutSeconds,
+        hardTimeoutSeconds,
+        transientRetryCount,
+        transientRetryDelayMillis,
+        "auto");
+  }
+
+  public LlmClient(
+      String apiUrl,
+      String apiKey,
+      String modelName,
+      double temperature,
+      int maxTokens,
+      int timeoutSeconds,
+      int hardTimeoutSeconds,
+      int transientRetryCount,
+      int transientRetryDelayMillis,
+      String thinkingMode) {
     this.httpClient =
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(timeoutSeconds)).build();
     this.apiUrl = normalizeApiUrl(apiUrl);
@@ -85,6 +111,8 @@ public class LlmClient {
     this.hardTimeoutSeconds = Math.max(1, hardTimeoutSeconds);
     this.transientRetryCount = Math.max(0, transientRetryCount);
     this.transientRetryDelayMillis = Math.max(0, transientRetryDelayMillis);
+    this.thinkingMode =
+        thinkingMode == null ? "auto" : thinkingMode.trim().toLowerCase(Locale.ROOT);
   }
 
   public CompletableFuture<String> askAiAsync(String systemPrompt, String userPrompt) {
@@ -112,18 +140,38 @@ public class LlmClient {
       double temperature,
       boolean responseFormatJsonObject,
       String mode) {
+    return askJsonAsync(
+        systemPrompt,
+        conversationMessages,
+        maxTokens,
+        temperature,
+        responseFormatJsonObject,
+        mode,
+        content -> true);
+  }
+
+  /** Validation and its single repair happen before the caller can execute any action. */
+  public CompletableFuture<String> askJsonAsync(
+      String systemPrompt,
+      List<ConversationMessage> conversationMessages,
+      int maxTokens,
+      double temperature,
+      boolean responseFormatJsonObject,
+      String mode,
+      Predicate<String> validator) {
     String safeMode = mode == null || mode.isBlank() ? "json" : mode;
     boolean sendResponseFormat = responseFormatJsonObject && !responseFormatUnsupported;
     long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds);
     CompletableFuture<String> firstAttempt =
         askAiAsyncInternal(
-            systemPrompt,
-            conversationMessages,
-            maxTokens,
-            temperature,
-            sendResponseFormat,
-            safeMode,
-            deadlineNanos);
+                systemPrompt,
+                conversationMessages,
+                maxTokens,
+                temperature,
+                sendResponseFormat,
+                safeMode,
+                deadlineNanos)
+            .thenApply(content -> validateResponse(content, validator));
     return firstAttempt
         .handle(
             (content, throwable) -> {
@@ -134,32 +182,90 @@ public class LlmClient {
                   sendResponseFormat && looksLikeUnsupportedResponseFormat(throwable);
               boolean emptyResponse =
                   unwrapCompletionException(throwable) instanceof EmptyResponseException;
-              if (!unsupportedFormat && !emptyResponse) {
+              boolean invalidResponse =
+                  unwrapCompletionException(throwable) instanceof InvalidResponseException;
+              if (!unsupportedFormat && !emptyResponse && !invalidResponse) {
                 return CompletableFuture.<String>failedFuture(throwable);
               }
 
-              String retryPrompt = systemPrompt;
-              if (unsupportedFormat) {
+              if (unsupportedFormat || (sendResponseFormat && emptyResponse)) {
                 responseFormatUnsupported = true;
                 LOGGER.warning(
-                    "当前 LLM 接口不支持 response_format=json_object，已自动重试并降级为 prompt-only JSON。");
-              } else {
-                LOGGER.warning("LLM 返回空正文，正在重试一次 prompt-only JSON（不执行任何动作）。");
-                retryPrompt =
-                    (systemPrompt == null ? "" : systemPrompt)
-                        + "\n必须在最终回复中输出符合上述约定的 JSON 对象，不能只思考而不作答。"
-                        + "闲聊也必须填写 chat 字段，无动作时 actions 为 []。";
+                    "LLM JSON 模式不可用或返回空正文，本次运行后续计划改用 prompt-only JSON；仍严格校验动作。reload 后重新尝试 JSON 模式。");
               }
+              LOGGER.warning("LLM 计划需要格式修复，重试一次：" + rootMessage(throwable));
+              String retryPrompt =
+                  (systemPrompt == null ? "" : systemPrompt)
+                      + "\n【输出契约优先于角色表达】只返回一个 JSON 对象，必须同时包含 chat 字符串和 actions 数组。"
+                      + "闲聊示例：{\"chat\":\"主人，我在呢。\",\"actions\":[]}。"
+                      + "执行动作示例：{\"chat\":\"\",\"actions\":[{\"type\":\"FOLLOW_START\"}]}。"
+                      + "仅使用本轮允许的动作；没有明确动作时只填写 chat，不输出 Markdown 或解释。";
               return askAiAsyncInternal(
-                  retryPrompt,
-                  conversationMessages,
+                      retryPrompt,
+                      conversationMessages,
+                      maxTokens,
+                      temperature,
+                      sendResponseFormat && !responseFormatUnsupported,
+                      safeMode + "-prompt",
+                      deadlineNanos)
+                  .thenApply(repaired -> validateResponse(repaired, validator));
+            })
+        .thenCompose(future -> future);
+  }
+
+  /** FINAL cannot execute actions, so it needs natural-language content, not an action envelope. */
+  public CompletableFuture<String> askFinalAsync(
+      String systemPrompt, List<ConversationMessage> messages, int maxTokens, double temperature) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds);
+    return askAiAsyncInternal(
+            systemPrompt, messages, maxTokens, temperature, false, "final", deadline)
+        .handle(
+            (content, error) -> {
+              if (error == null) return CompletableFuture.completedFuture(content);
+              if (!(unwrapCompletionException(error) instanceof EmptyResponseException)) {
+                return CompletableFuture.<String>failedFuture(error);
+              }
+              LOGGER.warning("LLM 最终回复为空，重试一次正文生成（不重复执行动作）。");
+              return askAiAsyncInternal(
+                  (systemPrompt == null ? "" : systemPrompt)
+                      + "\n请直接在最终正文中简短回答玩家，不要只思考而不作答，不输出 JSON 或动作计划。",
+                  messages,
                   maxTokens,
                   temperature,
                   false,
-                  safeMode + "-prompt",
-                  deadlineNanos);
+                  "final-reply",
+                  deadline);
             })
         .thenCompose(future -> future);
+  }
+
+  private String validateResponse(String content, Predicate<String> validator) {
+    if (!validator.test(content)) throw new InvalidResponseException(content);
+    return content;
+  }
+
+  /** Diagnostics never include conversation text, images or reasoning. */
+  public static String responseShape(String content) {
+    if (content == null || content.isBlank()) return "format=empty chars=0";
+    String value = content.trim();
+    if (value.startsWith("```")) return "format=code_fence chars=" + value.length();
+    if (!value.startsWith("{") && !value.startsWith("[")) {
+      return "format=text chars=" + value.length();
+    }
+    String format = "text";
+    try {
+      JsonElement parsed = JsonParser.parseString(value);
+      format = parsed.isJsonObject() ? "json_object" : "json_other";
+    } catch (RuntimeException ignored) {
+      format = "broken_json";
+    }
+    return "format=" + format + " chars=" + value.length();
+  }
+
+  private static final class InvalidResponseException extends RuntimeException {
+    private InvalidResponseException(String content) {
+      super("LLM 计划不符合 chat/actions 协议: " + responseShape(content));
+    }
   }
 
   private boolean looksLikeUnsupportedResponseFormat(Throwable throwable) {
@@ -177,6 +283,17 @@ public class LlmClient {
             || message.contains("invalid parameter")
             || message.contains("invalid_request");
     return mentionsResponseFormat && unsupportedWording;
+  }
+
+  private String thinkingType(URI uri) {
+    if (thinkingMode.equals("enabled") || thinkingMode.equals("disabled")) return thinkingMode;
+    if (thinkingMode.equals("provider")) return null;
+    // Do not send a vendor-specific parameter to arbitrary compatible APIs.
+    String model = modelName == null ? "" : modelName.toLowerCase(Locale.ROOT);
+    return "api.deepseek.com".equalsIgnoreCase(uri.getHost())
+            && (model.equals("deepseek-flash") || model.startsWith("deepseek-v4"))
+        ? "disabled"
+        : null;
   }
 
   private String errorDetectionText(Throwable throwable) {
@@ -264,6 +381,12 @@ public class LlmClient {
     payload.addProperty("model", this.modelName);
     payload.addProperty("temperature", temperature);
     payload.addProperty("max_tokens", maxTokens);
+    String thinkingType = thinkingType(uri);
+    if (thinkingType != null) {
+      JsonObject thinking = new JsonObject();
+      thinking.addProperty("type", thinkingType);
+      payload.add("thinking", thinking);
+    }
     if (responseFormatJsonObject) {
       JsonObject responseFormat = new JsonObject();
       responseFormat.addProperty("type", "json_object");

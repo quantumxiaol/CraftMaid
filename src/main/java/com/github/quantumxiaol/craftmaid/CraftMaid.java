@@ -172,7 +172,8 @@ public final class CraftMaid extends JavaPlugin {
             llm.timeoutSeconds(),
             llm.hardTimeoutSeconds(),
             llm.transientRetryCount(),
-            llm.transientRetryDelayMillis());
+            llm.transientRetryDelayMillis(),
+            llm.thinkingMode());
     if (llm.baseUrl().contains("api.openai.com") && llm.apiKey().isBlank()) {
       getLogger().warning("当前 LLM 地址是 OpenAI API，但未配置 llm.api_key。");
     }

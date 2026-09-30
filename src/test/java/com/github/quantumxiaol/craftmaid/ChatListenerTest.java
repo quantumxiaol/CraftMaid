@@ -43,7 +43,8 @@ class ChatListenerTest {
     when(player.isOnline()).thenReturn(true);
     var llm = mock(LlmClient.class);
     var pendingPlan = new CompletableFuture<String>();
-    when(llm.askJsonAsync(anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("plan")))
+    when(llm.askJsonAsync(
+            anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("plan"), any()))
         .thenReturn(pendingPlan);
     var scheduler = mock(BukkitScheduler.class);
     var queue = new ArrayDeque<Runnable>();
@@ -77,8 +78,7 @@ class ChatListenerTest {
             .thenReturn(
                 new com.github.quantumxiaol.craftmaid.intent.MaidActionExecutionResult(
                     true, List.of("ok")));
-        when(llm.askJsonAsync(
-                anyString(), anyList(), anyInt(), anyDouble(), anyBoolean(), eq("final")))
+        when(llm.askFinalAsync(anyString(), anyList(), anyInt(), anyDouble()))
             .thenReturn(new CompletableFuture<>());
       }
       queue.remove().run();

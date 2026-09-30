@@ -130,6 +130,7 @@ llm:
   base_url: "https://api.openai.com/v1/chat/completions" # 兼容 OpenAI 格式的 API 根地址或 chat/completions 完整地址
   api_key: "your-api-key-here" # 你的 API Key
   model_name: "gpt-3.5-turbo" # 你的模型名称，如 qwen-max
+  thinking_mode: auto # 官方 DeepSeek Flash/V4 关闭思考；其他接口不加参数，provider 可保留接口默认
   timeout_seconds: 30
   hard_timeout_seconds: 40 # 整次调用的硬超时，超时后会释放该玩家的对话锁
   transient_retry_count: 1 # plan/chat/memory 遇到连接重置、超时或 502/503/504 时重试次数
@@ -407,11 +408,15 @@ Job 状态和钓鱼控制：
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。`conversation.max_message_chars` 只截断玩家原话和存入历史的单条消息，不会截断本轮组合 prompt。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
-`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。接口返回空正文（包括只有 `reasoning_content`）时，会在同一超时预算内自动重试一次不带 `response_format` 的 JSON 请求；不会把思考内容当作回复或动作，也不会因一次空回复永久关闭 JSON 模式。重试仍失败时，游戏内保留“暂时没听清，请再说一次”的角色化提示，后台日志记录具体原因（如空正文、`finish_reason`、是否存在思考内容）；JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误和 HTTP 429/502/503/504 可按 `llm.transient_retry_*` 重试，final 在上述空正文/格式兼容重试后仍失败，只使用本地角色回复，不会重复执行 action。HTTP 重试遵守 `Retry-After` 和总超时预算。停止、新的行为命令以及 `/craftmaid reload` 会使先前在途动作计划失效；动作执行前还会在主线程检查，避免迟到结果重启任务。冷却期间会提示剩余等待时间。
+动作计划（PLAN）和最终回复（FINAL）使用不同的输出协议：PLAN 必须返回有效的 `{chat, actions}`，FINAL 直接生成给玩家看的自然语言正文，不再要求 JSON。PLAN 请求中的历史女仆回复会临时包装成 `{"chat":"原台词","actions":[]}`，避免历史中的纯文本台词干扰输出格式；存盘历史仍只保留原台词。FINAL 中即使模型返回了旧式 JSON，也只读取 `chat`，绝不再次执行其中的动作。
 
-如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
+`intent.response_format_json_object: true` 只对 PLAN 发送 `response_format: {"type":"json_object"}`。若接口不支持该参数，或 JSON 模式返回空正文，本次插件运行的后续 PLAN 会降级为只靠提示词约束 JSON，`/craftmaid reload` 后重置。空正文、无效 JSON 或不符合动作协议的结果最多修复一次，首次请求和修复共用 `llm.hard_timeout_seconds` 预算；修复仍不合格就不执行动作。FINAL 空正文也最多重试一次，同一组图片会保留，不重复采集或执行动作；正常的纯文本描述会直接展示，不会再因缺少 JSON 外壳而被替换成“没能完成环境分析”。
 
-为提高 DeepSeek 前缀缓存命中率，CraftMaid 会把稳定内容放在消息前缀：女仆人设、JSON 协议、action 白名单、安全规则、长期 Memory、历史对话；当前环境、job 状态、最近产出、背包摘要、玩家本轮原话和 action result 放在最后一个 user message。服务端日志会输出 DeepSeek 兼容 usage 中的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，例如 `LLM mode=plan cache_hit=... cache_miss=...`。
+`llm.thinking_mode` 默认 `auto`：对官方 `api.deepseek.com` 的 Flash/V4 模型显式发送 `thinking: {type: disabled}`，其他接口不自动添加供应商参数。`provider` 不发送该参数，完全采用服务商默认行为；`enabled` / `disabled` 可显式指定（第三方接口需自行支持）。旧配置不添加字段也使用 `auto`。DeepSeek 当前[默认开启思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)，其 [JSON 输出文档](https://api-docs.deepseek.com/guides/json_mode/)也说明可能出现空正文；关闭思考不保证完全消除接口异常。若主动开启思考，请为输出 token 留足空间。CraftMaid 始终只使用普通 `message.content`，不会将 `reasoning_content` 当作玩家回复或可执行计划。
+
+PLAN 最终失败时，游戏内保留“暂时没听清，请再说一次”的角色化提示，后台记录错误原因；协议错误会记录格式种类和字符数，不记录原始思考内容。所有对话同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令走本地兜底，不经 LLM 并可绕过冷却。plan/chat/memory 的瞬时网络错误和 HTTP 429/502/503/504 可按 `llm.transient_retry_*` 重试，遵守 `Retry-After` 和总超时预算；FINAL 最终失败使用本地回复。停止、新的行为命令及 reload 会使先前在途动作计划失效；动作执行前仍在主线程检查，避免迟到结果重启任务。冷却期间会提示剩余等待时间。
+
+为提高 DeepSeek 前缀缓存命中率，CraftMaid 会把稳定内容放在消息前缀：女仆人设、本阶段协议（PLAN 的 JSON/action 规则或 FINAL 的正文规则）、长期 Memory、历史对话；当前环境、job 状态、最近产出、背包摘要、玩家本轮原话和 action result 放在最后一个 user message。服务端日志会输出 DeepSeek 兼容 usage 中的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，例如 `LLM mode=plan cache_hit=... cache_miss=...`。
 
 `anchors.yml` 大致结构如下：
 
