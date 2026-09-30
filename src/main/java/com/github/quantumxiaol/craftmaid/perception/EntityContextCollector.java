@@ -6,6 +6,8 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
+import org.bukkit.Location;
 import org.bukkit.entity.Animals;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Boat;
@@ -25,17 +27,23 @@ import org.bukkit.entity.WanderingTrader;
 public final class EntityContextCollector {
   public EntityPerceptionSnapshot collect(
       Player player, CraftMaidConfig.EntityPerceptionSettings settings) {
+    return collect(player.getLocation(), player.getUniqueId(), settings);
+  }
+
+  public EntityPerceptionSnapshot collect(
+      Location center, UUID excluded, CraftMaidConfig.EntityPerceptionSettings settings) {
     if (settings == null || !settings.enabled()) {
       return new EntityPerceptionSnapshot(List.of());
     }
 
     List<Entity> nearby =
-        player
-            .getNearbyEntities(settings.radiusXz(), settings.radiusY(), settings.radiusXz())
+        center
+            .getWorld()
+            .getNearbyEntities(center, settings.radiusXz(), settings.radiusY(), settings.radiusXz())
             .stream()
+            .filter(entity -> !entity.getUniqueId().equals(excluded))
             .sorted(
-                Comparator.comparingDouble(
-                    entity -> entity.getLocation().distanceSquared(player.getLocation())))
+                Comparator.comparingDouble(entity -> entity.getLocation().distanceSquared(center)))
             .limit(Math.max(1, settings.maxEntities()))
             .toList();
     EnumMap<EntityGroupType, EnumMap<EntityType, Integer>> counts =

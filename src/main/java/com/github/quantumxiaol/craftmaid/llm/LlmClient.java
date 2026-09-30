@@ -114,6 +114,7 @@ public class LlmClient {
       String mode) {
     String safeMode = mode == null || mode.isBlank() ? "json" : mode;
     boolean sendResponseFormat = responseFormatJsonObject && !responseFormatUnsupported;
+    long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds);
     CompletableFuture<String> firstAttempt =
         askAiAsyncInternal(
             systemPrompt,
@@ -121,31 +122,42 @@ public class LlmClient {
             maxTokens,
             temperature,
             sendResponseFormat,
-            safeMode);
-    if (!sendResponseFormat) {
-      return firstAttempt;
-    }
-
+            safeMode,
+            deadlineNanos);
     return firstAttempt
         .handle(
             (content, throwable) -> {
               if (throwable == null) {
                 return CompletableFuture.completedFuture(content);
               }
-              if (!looksLikeUnsupportedResponseFormat(throwable)) {
+              boolean unsupportedFormat =
+                  sendResponseFormat && looksLikeUnsupportedResponseFormat(throwable);
+              boolean emptyResponse =
+                  unwrapCompletionException(throwable) instanceof EmptyResponseException;
+              if (!unsupportedFormat && !emptyResponse) {
                 return CompletableFuture.<String>failedFuture(throwable);
               }
 
-              responseFormatUnsupported = true;
-              LOGGER.warning(
-                  "当前 LLM 接口不支持 response_format=json_object，已自动重试并降级为 prompt-only JSON。");
+              String retryPrompt = systemPrompt;
+              if (unsupportedFormat) {
+                responseFormatUnsupported = true;
+                LOGGER.warning(
+                    "当前 LLM 接口不支持 response_format=json_object，已自动重试并降级为 prompt-only JSON。");
+              } else {
+                LOGGER.warning("LLM 返回空正文，正在重试一次 prompt-only JSON（不执行任何动作）。");
+                retryPrompt =
+                    (systemPrompt == null ? "" : systemPrompt)
+                        + "\n必须在最终回复中输出符合上述约定的 JSON 对象，不能只思考而不作答。"
+                        + "闲聊也必须填写 chat 字段，无动作时 actions 为 []。";
+              }
               return askAiAsyncInternal(
-                  systemPrompt,
+                  retryPrompt,
                   conversationMessages,
                   maxTokens,
                   temperature,
                   false,
-                  safeMode + "-prompt");
+                  safeMode + "-prompt",
+                  deadlineNanos);
             })
         .thenCompose(future -> future);
   }
@@ -213,6 +225,29 @@ public class LlmClient {
       double temperature,
       boolean responseFormatJsonObject,
       String mode) {
+    return askAiAsyncInternal(
+        systemPrompt,
+        conversationMessages,
+        maxTokens,
+        temperature,
+        responseFormatJsonObject,
+        mode,
+        System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds));
+  }
+
+  private CompletableFuture<String> askAiAsyncInternal(
+      String systemPrompt,
+      List<ConversationMessage> conversationMessages,
+      int maxTokens,
+      double temperature,
+      boolean responseFormatJsonObject,
+      String mode,
+      long deadlineNanos) {
+    long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+    if (remainingMillis <= 0) {
+      return CompletableFuture.failedFuture(
+          new HttpTimeoutException("LLM retry deadline exceeded"));
+    }
     URI uri;
     try {
       uri = URI.create(this.apiUrl);
@@ -252,7 +287,22 @@ public class LlmClient {
       }
       JsonObject message = new JsonObject();
       message.addProperty("role", conversationMessage.role());
-      message.addProperty("content", conversationMessage.content());
+      if (conversationMessage.images().isEmpty()) {
+        message.addProperty("content", conversationMessage.content());
+      } else {
+        JsonArray parts = new JsonArray();
+        parts.add(textPart(conversationMessage.content()));
+        for (var image : conversationMessage.images()) {
+          parts.add(textPart(image.label()));
+          JsonObject imageUrl = new JsonObject();
+          imageUrl.addProperty("url", image.dataUrl());
+          JsonObject part = new JsonObject();
+          part.addProperty("type", "image_url");
+          part.add("image_url", imageUrl);
+          parts.add(part);
+        }
+        message.add("content", parts);
+      }
       messages.add(message);
     }
     payload.add("messages", messages);
@@ -273,6 +323,15 @@ public class LlmClient {
     HttpRequest request = requestBuilder.build();
 
     String requestId = UUID.randomUUID().toString().substring(0, 8);
+    int imageCount =
+        safeConversationMessages.stream()
+            .filter(java.util.Objects::nonNull)
+            .filter(ConversationMessage::isValid)
+            .mapToInt(message -> message.images().size())
+            .sum();
+    if (imageCount > 0)
+      LOGGER.info(
+          "LLM vision request request_id=" + requestId + " mode=" + mode + " images=" + imageCount);
     long startedAtNanos = System.nanoTime();
     LOGGER.fine(
         "LLM request started request_id="
@@ -286,15 +345,9 @@ public class LlmClient {
             + "s");
 
     CompletableFuture<String> requestFuture =
-        sendWithTransientRetry(
-            request,
-            mode,
-            requestId,
-            1,
-            transientRetryCount,
-            System.nanoTime() + TimeUnit.SECONDS.toNanos(hardTimeoutSeconds));
+        sendWithTransientRetry(request, mode, requestId, 1, transientRetryCount, deadlineNanos);
     return requestFuture
-        .orTimeout(hardTimeoutSeconds, TimeUnit.SECONDS)
+        .orTimeout(remainingMillis, TimeUnit.MILLISECONDS)
         .whenComplete(
             (ignored, throwable) -> {
               if (throwable == null || looksLikeUnsupportedResponseFormat(throwable)) {
@@ -391,6 +444,30 @@ public class LlmClient {
         || mode.startsWith("plan-");
   }
 
+  private static JsonObject textPart(String text) {
+    JsonObject part = new JsonObject();
+    part.addProperty("type", "text");
+    part.addProperty("text", text);
+    return part;
+  }
+
+  /** Retry only a rejected image payload as text, never authentication/network failures. */
+  public boolean isImageInputRejected(Throwable throwable) {
+    for (Throwable cursor = throwable; cursor != null; cursor = cursor.getCause()) {
+      if (!(cursor instanceof LlmApiException error)) continue;
+      if (error.statusCode() == 413 || error.statusCode() == 415) return true;
+      if (error.statusCode() != 400 && error.statusCode() != 422) return false;
+      String text = error.detectionText().toLowerCase(Locale.ROOT);
+      return text.contains("image")
+          || text.contains("vision")
+          || text.contains("multimodal")
+          || text.contains("content must be a string")
+          || text.contains("图片")
+          || text.contains("图像");
+    }
+    return false;
+  }
+
   private boolean isTransientFailure(Throwable throwable) {
     Throwable cursor = throwable;
     while (cursor != null) {
@@ -432,7 +509,7 @@ public class LlmClient {
     if (responseJson.has("error")) {
       JsonObject error = responseJson.getAsJsonObject("error");
       String message = error.has("message") ? error.get("message").getAsString() : error.toString();
-      throw new LlmApiException(message, responseBody, statusCode, 0L);
+      throw new LlmApiException(summarize(message), responseBody, statusCode, 0L);
     }
 
     JsonArray choices = responseJson.getAsJsonArray("choices");
@@ -467,15 +544,18 @@ public class LlmClient {
       }
     }
 
-    if (hasReasoningContent) {
-      String reason =
-          "length".equalsIgnoreCase(finishReason)
-              ? "LLM 输出被 max_tokens 截断，只返回 reasoning_content，没有返回 content"
-              : "LLM 只返回 reasoning_content，没有返回 content";
-      throw new RuntimeException(reason + ": " + summarize(responseBody));
-    }
+    // Reasoning is neither a player reply nor an executable plan. Log metadata only.
+    throw new EmptyResponseException(finishReason, hasReasoningContent);
+  }
 
-    throw new RuntimeException("LLM 响应中没有可用文本: " + summarize(responseBody));
+  private static final class EmptyResponseException extends RuntimeException {
+    private EmptyResponseException(String finishReason, boolean hasReasoningContent) {
+      super(
+          "LLM 返回空正文: finish_reason="
+              + (finishReason.isBlank() ? "unknown" : finishReason)
+              + " reasoning_present="
+              + hasReasoningContent);
+    }
   }
 
   private void logUsage(JsonObject responseJson, String mode, String finishReason) {
@@ -538,7 +618,10 @@ public class LlmClient {
     if (body == null || body.isBlank()) {
       return "(empty body)";
     }
-    String compact = body.replaceAll("\\s+", " ").trim();
+    String compact =
+        body.replaceAll("data:image/[^;\\s\"]+;base64,[A-Za-z0-9+/=\\r\\n]+", "<image omitted>")
+            .replaceAll("\\s+", " ")
+            .trim();
     if (compact.length() <= 240) {
       return compact;
     }

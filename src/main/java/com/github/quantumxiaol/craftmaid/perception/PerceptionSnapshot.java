@@ -13,7 +13,7 @@ public record PerceptionSnapshot(
       builder.append("\n").append(entities.summary());
     }
     if (targetBlock != null && !targetBlock.isBlank()) {
-      builder.append("\n玩家视线：").append(targetBlock).append("。");
+      builder.append("\n玩家视线（来自玩家位置，不代表女仆视野）：").append(targetBlock).append("。");
     }
     if (blocks != null) {
       builder.append("\n").append(blocks.summary());

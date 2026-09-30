@@ -716,8 +716,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
 
     try {
       Object trait = getSentinelTrait(npc);
-      invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, player.getUniqueId());
       configureSentinelCombat(trait);
+      invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, player.getUniqueId());
       guarding = true;
       guardRevision++;
       plugin.getMaidCombatBuffService().start();
@@ -777,7 +777,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
       optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, targetKey);
       optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, targetKey);
-      invoke(trait, "addTarget", new Class<?>[] {String.class}, targetKey);
+      addSentinelLabel(trait, "addTarget", targetKey);
       scheduleGuardFightbackCleanup(targetKey);
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
@@ -803,7 +803,7 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       optionalInvokeIgnored(trait, "removeIgnore", new Class<?>[] {String.class}, targetKey);
       optionalInvokeIgnored(trait, "removeAvoid", new Class<?>[] {String.class}, targetKey);
       optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
-      invoke(trait, "addTarget", new Class<?>[] {String.class}, targetKey);
+      addSentinelLabel(trait, "addTarget", targetKey);
       return true;
     } catch (ReflectiveOperationException | LinkageError ex) {
       plugin.getLogger().warning("添加 Sentinel 自卫目标失败 " + player.getName() + ": " + rootMessage(ex));
@@ -839,9 +839,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
   private boolean configureSentinelGuard(NPC npc, Location guardLocation, String label) {
     try {
       Object trait = getSentinelTrait(npc);
+      configureSentinelCombat(trait);
       setField(trait, "spawnPoint", guardLocation.clone());
       invoke(trait, "setGuarding", new Class<?>[] {java.util.UUID.class}, new Object[] {null});
-      configureSentinelCombat(trait);
       guarding = true;
       guardRevision++;
       plugin.getMaidCombatBuffService().start();
@@ -1302,20 +1302,26 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     cleanupSentinelCombat(trait);
     List<String> unsupported = new ArrayList<>();
     MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
+    int supportedTargets = 0;
     for (String target : policy.hostileTargetKeys()) {
-      if (!optionalInvokeSupported(trait, "addTarget", new Class<?>[] {String.class}, target)) {
+      if (!optionalAddSentinelLabel(trait, "addTarget", target)) {
         unsupported.add("target:" + target);
+      } else {
+        supportedTargets++;
       }
     }
     for (String avoid : policy.avoidTargetKeys()) {
-      if (!optionalInvokeSupported(trait, "addAvoid", new Class<?>[] {String.class}, avoid)) {
+      if (!optionalAddSentinelLabel(trait, "addAvoid", avoid)) {
         unsupported.add("avoid:" + avoid);
       }
-      optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, avoid);
+      optionalAddSentinelLabel(trait, "addIgnore", avoid);
     }
 
     applySentinelBaseConfiguration(trait, unsupported);
     reportSentinelCompatibilityIssues(unsupported);
+    if (!policy.hostileTargetKeys().isEmpty() && supportedTargets == 0) {
+      throw new ReflectiveOperationException("Sentinel 没有成功添加任何护卫攻击目标");
+    }
   }
 
   private void applySentinelBaseConfiguration(Object trait, List<String> unsupported) {
@@ -1358,8 +1364,8 @@ public final class CitizensMaidNpcService implements MaidNpcService {
       optionalInvokeIgnored(trait, "removeTarget", new Class<?>[] {String.class}, targetKey);
       MaidCombatPolicy policy = plugin.getMaidCombatPolicy();
       if (policy != null && policy.avoidTargetKeys().contains(targetKey)) {
-        optionalInvokeIgnored(trait, "addAvoid", new Class<?>[] {String.class}, targetKey);
-        optionalInvokeIgnored(trait, "addIgnore", new Class<?>[] {String.class}, targetKey);
+        optionalAddSentinelLabel(trait, "addAvoid", targetKey);
+        optionalAddSentinelLabel(trait, "addIgnore", targetKey);
       }
     } catch (ClassNotFoundException | LinkageError ex) {
       plugin.getLogger().fine("清理 Sentinel 反击目标失败 " + targetKey + ": " + rootMessage(ex));
@@ -1449,6 +1455,24 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     target.getClass().getMethod(methodName, parameterTypes).invoke(target, args);
   }
 
+  private void addSentinelLabel(Object trait, String methodName, String key)
+      throws ReflectiveOperationException {
+    // Sentinel's addTarget/addAvoid/addIgnore skip the validation its commands perform.
+    // An unknown label can clear the entire list during recalculateTargetsCache().
+    Class<?> labelClass =
+        Class.forName(
+            "org.mcmonkey.sentinel.targeting.SentinelTargetLabel",
+            true,
+            trait.getClass().getClassLoader());
+    Object label = labelClass.getConstructor(String.class).newInstance(key);
+    for (String check : List.of("isValidTarget", "isValidPrefix", "isValidRegex", "isValidMulti")) {
+      if (!Boolean.TRUE.equals(labelClass.getMethod(check).invoke(label))) {
+        throw new ReflectiveOperationException("Sentinel 不支持目标: " + key);
+      }
+    }
+    invoke(trait, methodName, new Class<?>[] {String.class}, key);
+  }
+
   private void optionalInvoke(
       Object target, String methodName, Class<?>[] parameterTypes, Object... args)
       throws ReflectiveOperationException {
@@ -1468,10 +1492,9 @@ public final class CitizensMaidNpcService implements MaidNpcService {
     }
   }
 
-  private boolean optionalInvokeSupported(
-      Object target, String methodName, Class<?>[] parameterTypes, Object arg) {
+  private boolean optionalAddSentinelLabel(Object target, String methodName, String key) {
     try {
-      invoke(target, methodName, parameterTypes, arg);
+      addSentinelLabel(target, methodName, key);
       return true;
     } catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ex) {
       return false;

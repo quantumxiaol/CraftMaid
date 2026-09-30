@@ -1,6 +1,22 @@
 package com.github.quantumxiaol.craftmaid.conversation;
 
-public record ConversationMessage(String role, String content) {
+import java.util.List;
+
+public record ConversationMessage(String role, String content, List<ConversationImage> images) {
+  public ConversationMessage {
+    images = images == null ? List.of() : List.copyOf(images);
+    if (images.size() > 4 || (!images.isEmpty() && !"user".equals(role)))
+      throw new IllegalArgumentException("只有当前 user 消息可以携带最多四张图片。");
+  }
+
+  public ConversationMessage(String role, String content) {
+    this(role, content, List.of());
+  }
+
+  public static ConversationMessage user(String content, List<ConversationImage> images) {
+    return new ConversationMessage("user", content, images);
+  }
+
   public static ConversationMessage user(String content) {
     return new ConversationMessage("user", content);
   }

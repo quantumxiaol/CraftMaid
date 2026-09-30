@@ -24,11 +24,13 @@ public class CraftMaidCommand implements TabExecutor {
   private static final List<String> SUBCOMMANDS =
       List.of(
           "help", "version", "spawn", "despawn", "hide", "show", "refresh", "remove", "reload",
-          "forget", "follow", "anchor", "region", "job", "fishing", "chunk", "harvest");
+          "forget", "follow", "anchor", "region", "job", "fishing", "chunk", "harvest", "photo",
+          "vision");
   private static final List<String> ADMIN_SUBCOMMANDS =
-      List.of("reload", "spawn", "despawn", "hide", "show", "refresh", "remove", "forget");
+      List.of(
+          "reload", "spawn", "despawn", "hide", "show", "refresh", "remove", "forget", "vision");
   private static final List<String> CONTROL_SUBCOMMANDS =
-      List.of("follow", "anchor", "region", "job", "fishing", "chunk", "harvest");
+      List.of("follow", "anchor", "region", "job", "fishing", "chunk", "harvest", "photo");
   private static final List<String> FOLLOW_ACTIONS = List.of("start", "stop");
   private static final List<String> JOB_ACTIONS = List.of("status", "stop");
   private static final List<String> FISHING_ACTIONS = List.of("start", "stop");
@@ -79,6 +81,57 @@ public class CraftMaidCommand implements TabExecutor {
     }
 
     switch (subcommand) {
+      case "vision" -> {
+        if (args.length > 2
+            || (args.length == 2
+                && !args[1].equalsIgnoreCase("prepare")
+                && !args[1].equalsIgnoreCase("status"))) {
+          sender.sendMessage(
+              Component.text("用法: /" + label + " vision <prepare|status>", NamedTextColor.YELLOW));
+          return true;
+        }
+        if (args.length == 1 || args[1].equalsIgnoreCase("status")) {
+          sender.sendMessage(
+              Component.text(plugin.getVisionService().assetStatus(), NamedTextColor.YELLOW));
+          return true;
+        }
+        var result =
+            plugin
+                .getVisionService()
+                .prepareAssets(
+                    completed -> {
+                      if (sender instanceof Player player && !player.isOnline()) return;
+                      sender.sendMessage(
+                          Component.text(
+                              completed.message(),
+                              completed.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+                    });
+        sender.sendMessage(
+            Component.text(
+                result.message(), result.accepted() ? NamedTextColor.YELLOW : NamedTextColor.RED));
+        return true;
+      }
+      case "photo" -> {
+        if (args.length != 1) {
+          sender.sendMessage(Component.text("用法: /" + label + " photo", NamedTextColor.YELLOW));
+          return true;
+        }
+        var result =
+            plugin
+                .getVisionService()
+                .capture(
+                    completed -> {
+                      if (sender instanceof Player player && !player.isOnline()) return;
+                      sender.sendMessage(
+                          Component.text(
+                              completed.message(),
+                              completed.success() ? NamedTextColor.GREEN : NamedTextColor.RED));
+                    });
+        sender.sendMessage(
+            Component.text(
+                result.message(), result.accepted() ? NamedTextColor.YELLOW : NamedTextColor.RED));
+        return true;
+      }
       case "reload" -> {
         boolean reconciled = plugin.reloadPlugin();
         sender.sendMessage(
@@ -171,6 +224,12 @@ public class CraftMaidCommand implements TabExecutor {
                       || (CONTROL_SUBCOMMANDS.contains(subcommand) && canControl(sender)))
           .filter(subcommand -> subcommand.startsWith(prefix))
           .toList();
+    }
+
+    if (args.length == 2 && args[0].equalsIgnoreCase("vision")) {
+      return sender.hasPermission("craftmaid.admin")
+          ? filter(List.of("prepare", "status"), args[1].toLowerCase(Locale.ROOT))
+          : List.of();
     }
 
     if (args.length == 2 && args[0].equalsIgnoreCase("follow")) {
@@ -763,6 +822,9 @@ public class CraftMaidCommand implements TabExecutor {
             .append(Component.text(" - 查看插件版本和已记录 NPC 状态", NamedTextColor.GRAY)));
     if (sender.hasPermission("craftmaid.admin")) {
       sender.sendMessage(
+          Component.text("/" + label + " vision <prepare|status>", NamedTextColor.YELLOW)
+              .append(Component.text(" - 提前下载/校验视觉资源，或查看下载进度", NamedTextColor.GRAY)));
+      sender.sendMessage(
           Component.text("/" + label + " spawn", NamedTextColor.YELLOW)
               .append(Component.text(" - 在当前位置生成或移动女仆 NPC", NamedTextColor.GRAY)));
       sender.sendMessage(
@@ -808,6 +870,9 @@ public class CraftMaidCommand implements TabExecutor {
     sender.sendMessage(
         Component.text("/" + label + " region <set|list|remove|show>", NamedTextColor.YELLOW)
             .append(Component.text(" - 管理命名长方体 region", NamedTextColor.GRAY)));
+    sender.sendMessage(
+        Component.text("/" + label + " photo", NamedTextColor.YELLOW)
+            .append(Component.text(" - 从女仆位置拍摄四向图片并保存到服务器", NamedTextColor.GRAY)));
   }
 
   private OptionalRegionInput parseRegionInput(

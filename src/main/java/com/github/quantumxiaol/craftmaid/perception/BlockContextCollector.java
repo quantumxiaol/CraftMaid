@@ -18,7 +18,11 @@ public final class BlockContextCollector {
 
   public BlockPerceptionSnapshot collect(
       Player player, CraftMaidConfig.BlockPerceptionSettings settings) {
-    Location center = player.getLocation();
+    return collect(player.getLocation(), settings, false);
+  }
+
+  public BlockPerceptionSnapshot collect(
+      Location center, CraftMaidConfig.BlockPerceptionSettings settings, boolean fresh) {
     World world = center.getWorld();
     if (world == null) {
       return empty(settings);
@@ -27,7 +31,7 @@ public final class BlockContextCollector {
     PerceptionCacheKey cacheKey = PerceptionCacheKey.from(center, settings);
     long now = System.currentTimeMillis();
     CachedBlockSnapshot cached = cache.get(cacheKey);
-    if (cached != null && cached.expiresAtMillis() > now) {
+    if (!fresh && cached != null && cached.expiresAtMillis() > now) {
       return cached.snapshot();
     }
 

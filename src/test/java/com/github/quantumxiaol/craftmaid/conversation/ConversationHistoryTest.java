@@ -13,6 +13,27 @@ class ConversationHistoryTest {
   @TempDir Path directory;
 
   @Test
+  void imagesBelongOnlyToCurrentPromptAndNeverPersist() throws Exception {
+    CraftMaid plugin = mock(CraftMaid.class);
+    when(plugin.getDataFolder()).thenReturn(directory.toFile());
+    var history = new ConversationHistory(plugin);
+    history.configure(true, 100, 1200, 4000, true, "history.json");
+    UUID player = UUID.randomUUID();
+    var image = ConversationImage.png("NORTH", new byte[] {1, 2, 3});
+    var current = history.buildPromptMessages(player, "同一快照", java.util.List.of(image));
+    assertEquals(java.util.List.of(image), current.getLast().images());
+    history.appendExchange(player, "player", "附近有什么", "北边有树");
+    var next = history.buildPromptMessages(player, "普通聊天");
+    assertEquals(3, next.size());
+    assertTrue(next.stream().allMatch(message -> message.images().isEmpty()));
+    history.shutdown();
+    String saved = java.nio.file.Files.readString(directory.resolve("history.json"));
+    assertFalse(saved.contains("base64"));
+    assertFalse(saved.contains("同一快照"));
+    assertTrue(saved.contains("北边有树"));
+  }
+
+  @Test
   void shutdownFlushesBatchedHistoryAndForget() throws Exception {
     CraftMaid plugin = mock(CraftMaid.class);
     when(plugin.getDataFolder()).thenReturn(directory.toFile());

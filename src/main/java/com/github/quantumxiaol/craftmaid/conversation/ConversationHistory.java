@@ -83,9 +83,14 @@ public class ConversationHistory {
 
   public synchronized List<ConversationMessage> buildPromptMessages(
       UUID playerId, String currentUserPrompt) {
+    return buildPromptMessages(playerId, currentUserPrompt, List.of());
+  }
+
+  public synchronized List<ConversationMessage> buildPromptMessages(
+      UUID playerId, String currentUserPrompt, List<ConversationImage> images) {
     // The current prompt includes trusted context and action results, not just player speech.
     ConversationMessage currentMessage =
-        ConversationMessage.user(currentUserPrompt == null ? "" : currentUserPrompt);
+        ConversationMessage.user(currentUserPrompt == null ? "" : currentUserPrompt, images);
     if (!enabled) {
       return List.of(currentMessage);
     }

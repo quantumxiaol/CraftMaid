@@ -46,6 +46,7 @@ maid:
     destination_teleport_margin: -1.0
   combat:
     # 只主动攻击 hostile_targets 白名单里的目标；保护目标请放入 avoid_targets。
+    # 当前 Sentinel 版本不支持的目标会在写入前跳过并记录警告，不影响其他目标。
     hostile_targets:
       - zombies
       - skeletons
@@ -166,6 +167,35 @@ chat:
   reply_prefix: "[{name}] "
 perception:
   enabled: true
+  # /maid photo 仅保存本地文件，不依赖 perception.enabled。
+  # 环境观察 action 可按需发送图片；不会定时拍照或因普通闲聊触发。
+  vision:
+    enabled: true
+    # 仅 INSPECT_SURROUNDINGS 的最终回复发送四张图片，使用现有 llm 接口和模型。
+    # 需要 intent.enabled / intent.llm_json / perception.enabled；模型必须支持图片输入。
+    # false 保留文字观察和 /maid photo 本地拍照；旧配置缺省为 true。
+    send_to_llm: true
+    # 使用服务端版本对应的原版客户端资源，仅读取模型/贴图，不启动客户端。
+    # /maid vision prepare 可提前下载并校验；/maid vision status 查看进度。
+    # 缓存位于 vision/assets/<版本>/；聊天遇到资源缺失时先文字回复，后台准备资源。
+    assets:
+      auto_download: true
+      # auto_download 控制自动下载；管理员主动执行 vision prepare 时可单次下载。
+      # 可指定本地原版客户端 jar；绝对路径，或相对于 plugins/CraftMaid 的路径。
+      # 留空时使用自动下载/已校验缓存。服务端 jar 不包含所需客户端贴图。
+      client_jar: ""
+      # 可选 Java 资源包 zip，覆盖原版贴图/JSON 模型；仅支持标准资源格式。
+      resource_pack: ""
+    # 每个方向的尺寸，固定拍北/东/南/西四张；上下限 128–640 / 96–480。
+    width: 384
+    height: 256
+    # 距离 8–48 格，只采集已加载区块；未加载区域为灰色，不主动加载/生成区块。
+    distance: 24
+    horizontal_fov: 100 # 90–110 度，相邻方向有重叠
+    pitch: 10 # 固定俯角，正数向下；不读取女仆或玩家朝向
+    cooldown_seconds: 10 # 全局冷却；同一时间只处理一组图片
+    timeout_seconds: 10 # 后台渲染及编码超时，2–30 秒
+    retained_captures: 10 # 只保留最近若干组完整图片，1–50
   entities:
     enabled: true
     radius_xz: 12

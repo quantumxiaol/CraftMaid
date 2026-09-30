@@ -23,7 +23,7 @@ public record BlockPerceptionSnapshot(
 
     StringBuilder builder = new StringBuilder();
     builder
-        .append("方块统计：以玩家为中心，左右 ")
+        .append("方块统计：以上述观察点为中心，左右 ")
         .append(radiusXz)
         .append(" 格，上 ")
         .append(up)

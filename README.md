@@ -11,7 +11,8 @@ CraftMaid 分成两层能力。
 ## 当前能力
 
 * **AI 对话**：玩家在公屏提到女仆名字后触发回复；喊过一次名字后，默认 180 秒内同一玩家可以继续免唤醒对话。
-* **环境感知**：对话时会采集时间、天气、附近实体分组和玩家视线目标；LLM 还可以通过只读 `INSPECT_SURROUNDINGS` action 按需获取周围方块统计、材料 Top、类别比例和场景推测。
+* **环境感知**：以女仆位置采集时间、天气和附近实体，玩家准星目标单独标注来源；LLM 可通过只读 `INSPECT_SURROUNDINGS` action 按需获取视觉观察，图片不可用时回退到方块统计等文字信息。
+* **四向视觉观察**：从女仆眼睛位置采集同一份世界快照，内置 CPU 渲染北/东/南/西四张原版材质图片；询问附近场景时通过 `INSPECT_SURROUNDINGS` 发送给 LLM，`/maid photo` 可单独检查成像。无需额外渲染插件或客户端模组。
 * **多轮记忆**：按玩家 UUID 管理历史；只记录玩家原话和女仆最终回复。超过 `conversation.max_messages` 后调用 LLM 压缩成结构化 Memory，并保留最近 `N/5` 条原始历史。
 * **Citizens 女仆实体**：可生成一个 `EntityType.PLAYER` NPC，记录 NPC id，并通过右键打开 CraftMaid 菜单。
 * **右键菜单**：支持查看状态、召回、设置 home、回家、看向玩家、打开背包、配置装备、刷新皮肤、默认锚点/区域设置、跟随、停止工作、解除玩家敌意和护卫控制。
@@ -406,7 +407,7 @@ Job 状态和钓鱼控制：
 
 每次 JSON 对话请求会发送：稳定的 system prompt（女仆人设、JSON 协议、action 白名单和规则）、可选长期 Memory、最近聊天历史，以及本轮最后一条 user message。`conversation.max_message_chars` 只截断玩家原话和存入历史的单条消息，不会截断本轮组合 prompt。本轮 user message 里包含玩家名和身份、玩家原话、当前环境、Job 状态、可用工作配置、最近工作事件和女仆背包摘要。默认 `perception.blocks.mode: on_demand` 时不会每次扫描方块；当 LLM 请求 `INSPECT_SURROUNDINGS` 后，插件会在主线程扫描已加载 chunk 中的周围方块，并把统计摘要带入 FINAL 回复。`plan_max_tokens` 和 `final_max_tokens` 只限制模型输出长度，不限制这些输入上下文。
 
-`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误和 HTTP 429/502/503/504 可按 `llm.transient_retry_*` 重试，final 失败只使用本地角色回复，不会重复执行 action。HTTP 重试遵守 `Retry-After` 和总超时预算。停止、新的行为命令以及 `/craftmaid reload` 会使先前在途动作计划失效；动作执行前还会在主线程检查，避免迟到结果重启任务。冷却期间会提示剩余等待时间。
+`intent.response_format_json_object: true` 时，CraftMaid 会先在请求体里带上 `response_format: {"type":"json_object"}`。DeepSeek 和 OpenAI GPT 支持这类 JSON 输出约束；如果某个 OpenAI-compatible 接口返回“不支持 / unknown / invalid response_format”之类错误，插件会自动重试一次不带该参数，并在本次插件运行期间降级为只靠 system prompt 约束 JSON。接口返回空正文（包括只有 `reasoning_content`）时，会在同一超时预算内自动重试一次不带 `response_format` 的 JSON 请求；不会把思考内容当作回复或动作，也不会因一次空回复永久关闭 JSON 模式。重试仍失败时，游戏内保留“暂时没听清，请再说一次”的角色化提示，后台日志记录具体原因（如空正文、`finish_reason`、是否存在思考内容）；JSON 解析失败不会执行 action。JSON turn 同样受 `chat.cooldown_seconds` 限制；“停下 / 停止工作 / 别钓鱼了 / 别收田了”等极简停止指令会走本地兜底，不经 LLM，并可绕过冷却。`llm.hard_timeout_seconds` 会在接口长期无响应时强制结束本次调用并释放玩家请求锁；plan/chat/memory 的瞬时网络错误和 HTTP 429/502/503/504 可按 `llm.transient_retry_*` 重试，final 在上述空正文/格式兼容重试后仍失败，只使用本地角色回复，不会重复执行 action。HTTP 重试遵守 `Retry-After` 和总超时预算。停止、新的行为命令以及 `/craftmaid reload` 会使先前在途动作计划失效；动作执行前还会在主线程检查，避免迟到结果重启任务。冷却期间会提示剩余等待时间。
 
 如果使用会输出 `reasoning_content` 的推理模型，建议给 `plan_max_tokens` 和 `final_max_tokens` 留足空间，或者换用非推理聊天模型。CraftMaid 只会解析普通 `message.content`，不会把 `reasoning_content` 当作可执行 JSON。
 
@@ -438,7 +439,7 @@ regions:
       pos2: ...
 ```
 
-护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫；插件每秒检查一次，到期、超距、离线或跨世界都会同时删除 Sentinel UUID 目标并结束追击。“解除敌意”可立即清除全部当前玩家自卫目标。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
+护卫启动前会先用已安装 Sentinel 的目标校验接口验证配置；不支持的目标（如部分版本中的 `creaking`）会被跳过并记录兼容警告，避免破坏整张目标表。如果配置了攻击目标但全部添加失败，护卫启动会报失败。无需为此删除旧配置项。护卫战斗里，Sentinel 只会主动添加 `hostile_targets` 里的明确敌对目标，并对 `avoid_targets` 添加回避/忽略。`fightback_targets` 不会被主动攻击；只有护卫模式下它们攻击主人后，CraftMaid 才会临时把对应类型加入 Sentinel 反击目标，15 秒后移除。主人误伤女仆默认取消伤害并记录为误伤，女仆不会还手；女仆对主人的伤害永远会被取消。非主人玩家攻击女仆时，会按 `self_defense.duration_seconds` 和 `self_defense.max_chase_distance` 触发短时自卫；插件每秒检查一次，到期、超距、离线或跨世界都会同时删除 Sentinel UUID 目标并结束追击。“解除敌意”可立即清除全部当前玩家自卫目标。`maid.combat.survivability` 会在护卫初始化时写入 Sentinel 虚拟血量/护甲/回血，并在护卫中周期刷新隐藏的恢复、抗性和吸收效果，不会显示盔甲。
 
 `maid.combat.enemy_drops: true` 会在 Sentinel 护卫初始化时打开敌怪掉落。`maid.combat.enemy_exp: true` 会在插件能识别到最后一击来自女仆、且服务端给出 0 经验时尝试补 `default_enemy_exp` 点经验。默认配置是开启的；如果实服没有经验，先用 `/maid version` 确认实际加载的版本，并检查 `plugins/CraftMaid/config.yml` 里是否有 `maid.combat.enemy_exp: true`。reload/refresh 会清理旧 Sentinel 战斗状态；之后再次点击“保护主人”或“守在这里”会按当前配置建立新的护卫状态。
 
@@ -468,6 +469,67 @@ NPC 生命周期管理：
 /craftmaid forget Player   # 清空指定玩家历史
 /craftmaid forget all      # 清空全部历史
 ```
+
+### 四向拍照预览
+
+更新 jar 并完整重启服务器后，由主人或有控制权限的玩家执行 `/maid photo`；控制台也可执行。无需安装新的插件。女仆必须已生成，拍摄不会移动她、改变朝向或停止跟随/工作。管理员玩家是否可以控制仍遵守 `maid.access.admin_can_control`。
+
+文件保存在服务器的 `plugins/CraftMaid/vision/captures/capture-<时间>-<ID>/`：
+
+* `north.png`、`east.png`、`south.png`、`west.png`：四个固定世界方向，完全不读取女仆或玩家的 yaw/pitch；北为 -Z、东为 +X、南为 +Z、西为 -X。
+* `overview.png`：带方向标签的四宫格预览（上排北/东，下排南/西）。
+* `observation.json`：女仆眼睛坐标、世界、NPC UUID、采集时间、游戏 tick、参数、资源版本、是否覆盖资源包、快照/渲染耗时、缺失区块、各方向命中材料、使用简化形状的材料列表和同位置的附近实体。附近实体列表不代表它们在画面中可见。
+
+默认每张 384×256，距离 24 格、水平视角 100°、固定向下 10°，四向覆盖水平周围并有少量重叠，不包含完整头顶/脚下全景。渲染器读取原版 `blockstates`、继承模型、方块贴图、UV、模型旋转和 multipart 状态：草与树叶使用透明纹理，方块顶面/侧面使用原版贴图，门窗、楼梯、作物等按实际方块状态选择模型。草叶和水的染色使用快照中的生物群系和原版颜色表。
+
+建议在首次询问环境前，由管理员（`craftmaid.admin`）或控制台执行：
+
+```text
+/maid vision prepare   # 后台下载/校验资源，完成或失败时通知命令发起者
+/maid vision status    # 查看当前资源状态、已下载 MB 和百分比
+```
+
+准备资源不需要生成女仆，不拍照、不调用 LLM、不消耗拍照冷却；有其他视觉任务运行时不会重复启动下载。下载中每 5 秒更新一次状态并写入控制台日志。重启后的状态初始为“尚未检查”，执行 `prepare` 会重新校验已有缓存。`auto_download: false` 禁用自动下载，但管理员主动执行 `prepare` 仍可单次下载；指定本地 `client_jar` 时优先校验该文件。
+
+资源来自 Mojang [官方版本清单](https://piston-meta.mojang.com/mc/game/version_manifest_v2.json)：根据服务端版本读取元数据中的 `downloads.client` 地址，从 `piston-data.mojang.com` 下载原版客户端 jar，按官方大小和 SHA-1 校验后缓存到 `plugins/CraftMaid/vision/assets/<版本>/client.jar`。26.1.2 的[官方客户端资源](https://piston-data.mojang.com/v1/objects/4e618f09a0c649dde3fdf829df443ce0b8831e65/client.jar)为 38,113,927 字节（约 38.1 MB），SHA-1 为 `4e618f09a0c649dde3fdf829df443ce0b8831e65`。`.part` 是尚未下载/校验完的临时文件，不代表就绪；成功后生成 `client.jar` 和 `client.sha1`，之后离线复用缓存。资源准备总预算为 30 分钟，独立于渲染超时，每次连接/读取超时 10 秒；资源超时会提示检查网络，不会误报为需要降低渲染分辨率。
+
+如果官方链路较慢，可以自行下载同版本的原版客户端 jar，将 `perception.vision.assets.client_jar` 设置为本地文件的绝对路径或相对于 `plugins/CraftMaid` 的路径，再执行 `prepare` 校验。此文件只作为资源压缩包读取，不运行客户端代码；服务器 jar 不含所需贴图。手动 `/maid photo` 在缺少资源且启用自动下载时仍会等待后台下载；采集时间和位置在请求开始时固定，下载后保存的仍是那份快照。环境聊天不会等待下载完成：本轮先使用文字观察，资源在后台准备，之后再次询问时再拍摄新图。
+
+这仍是服务端软件渲染，并非完整客户端渲染器：光照、雾和生物群系颜色混合有所简化；动画取第一帧，水面为近似平面；生物、玩家皮肤、粒子和告示牌文字尚未渲染。箱子、床等由客户端专用方块实体渲染器绘制的物体会使用简化形状，并在 `fallbackMaterials` 中列出。可通过 `assets.resource_pack` 指定标准 Java 资源包 zip 覆盖贴图和 JSON 方块模型；不支持 OptiFine/CIT、模组渲染代码、着色器或特殊 atlas 变换。服务端自定义数据包的生物群系颜色也暂未读取。
+
+在默认 JSON 对话模式下，询问“露西，你看看附近有什么”“这片建筑看起来是什么”会让模型请求 `INSPECT_SURROUNDINGS`。插件拍摄四向图片后，将四张 PNG 的 Base64 `image_url` 内容和方向标签加入本轮 FINAL 请求，使用已有 `llm.base_url`、`api_key`、`model_name`。接口格式参考 [DeepSeek 图像理解文档](https://api-docs.deepseek.com/zh-cn/guides/vision/)，需要所选接口和模型支持图片输入。没有额外图片托管或视觉模型服务；图片会发送到你配置的 LLM 服务商。
+
+图片及其文字说明来自同一份快照：女仆眼睛坐标、采集时间、天气、附近实体和渲染表面材料。文字环境采集也以女仆位置为中心；普通提示中的玩家准星信息会单独标明来源，观察结果不混入玩家准星。实体尚未渲染，因此提示明确区分“传感器记录到的附近实体”和“图中看见的方块”。只发送这一轮的四张独立图片，普通闲聊、动作计划、记忆压缩和后续历史都不携带图片；`/maid photo` 只保存本地文件，不上传。
+
+图片观察与手动拍摄共享全局冷却、单任务限制和最近 10 组文件保留策略。正在拍摄、冷却、资源尚未准备或渲染失败时，使用请求时已采集的女仆周围文字信息，并告知模型本轮没有图片。资源缺失且开启 `auto_download` 时另行启动后台准备，聊天不等网络下载；准备完后需再次询问，不补发旧场景。接口明确拒绝图片输入时，只重试一次纯文字 FINAL，不重新拍照、不重复执行动作；认证失败、网络故障等仍按正常失败流程处理。等待期间发生重载、停用、玩家离线或女仆收到更新安排，不会继续发送迟到的拍摄结果。
+
+控制台出现 `LLM vision request ... mode=final images=4` 表示这次请求携带四张图片；日志不会输出图片 Base64。如果接口拒绝图片，控制台会记录文字回退，玩家动作栏也会提示。原有的模型输出 token 限制不裁剪图片输入，图片计费与识别能力取决于配置的模型。
+
+自动发送需要 `intent.enabled`、`intent.llm_json`、`perception.enabled`、`perception.vision.enabled` 和 `perception.vision.send_to_llm` 均为 `true`，默认即如此。设 `send_to_llm: false` 可保留文字观察和手动拍摄；`/maid photo` 不受 `perception.enabled` 或 `send_to_llm` 控制。旧配置缺少新增字段时使用默认值。需要调整时添加以下内容到已有的 `perception` 节点内（不要再建一个同名顶层节点）：
+
+```yaml
+  vision:
+    enabled: true
+    send_to_llm: true
+    assets:
+      auto_download: true
+      client_jar: "" # 例如 vision/assets/26.1.2/client.jar；也可以是绝对路径
+      resource_pack: "" # 可选，例如 vision/my-pack.zip
+    width: 384
+    height: 256
+    distance: 24
+    horizontal_fov: 100
+    pitch: 10
+    cooldown_seconds: 10
+    timeout_seconds: 10
+    retained_captures: 10
+```
+
+采集仅在主线程复制已加载区块快照和实体信息，不主动加载或生成区块。区块复制间检查 40ms 预算，超出后中止并提示降低距离；单次 API 调用本身不能被抢占。四向渲染、PNG 编码和保存由一个后台线程完成，使用同一份快照；未加载区域显示灰色。全局冷却和单任务限制防止堆积，后台工作协作检查超时，reload/disable 会取消旧任务并抑制迟到回调。默认保留最近 10 组完整采集，旧组自动清理。
+
+本模块采用逐像素射线穿越方块的方式，可对照 MIT 项目 [ImageryAPI](https://github.com/jensjeflensje/minecraft_imagery) 和 [Bukkit Screenshot](https://github.com/WinX64/bukkit-screenshot) 理解方案；此实现独立使用 Paper `ChunkSnapshot`、原版 JSON 模型与贴图，不打包这些插件或 Minecraft 客户端素材。资源准备、模型解析、贴图解码、渲染和保存都在后台执行。
+
+运行 `mvn test` 使用程序生成的测试资源验证渲染，默认合成样图不依赖本地游戏。使用 `mvn test -Dcraftmaid.vision.clientJar=/绝对路径/26.1.2.jar` 可同时检查真实原版资源解析，并在 `target/vision-preview/` 生成使用原版贴图的合成村落样图和 `model-coverage.txt`。这是渲染验证，不是实服截图或实服性能基准；实际光照效果、采集开销和模型识别效果仍需游戏内验证。
 
 ### 3. 与女仆对话
 在公屏聊天中，只要你的话语包含女仆的名字（如：`露西`），她就会回复你：

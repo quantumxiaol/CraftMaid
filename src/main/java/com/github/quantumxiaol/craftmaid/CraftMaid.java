@@ -20,6 +20,9 @@ import com.github.quantumxiaol.craftmaid.menu.MaidMenuService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcService;
 import com.github.quantumxiaol.craftmaid.npc.MaidNpcServices;
 import com.github.quantumxiaol.craftmaid.perception.MaidPerceptionService;
+import com.github.quantumxiaol.craftmaid.vision.MaidVisionService;
+import com.github.quantumxiaol.craftmaid.vision.VisionAssetSettings;
+import com.github.quantumxiaol.craftmaid.vision.VisionSettings;
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
@@ -41,6 +44,9 @@ public final class CraftMaid extends JavaPlugin {
   private MaidCombatBuffService combatBuffService;
   private MaidSelfDefenseService selfDefenseService;
   private MaidPerceptionService perceptionService;
+  private MaidVisionService visionService;
+  private VisionSettings visionSettings;
+  private VisionAssetSettings visionAssetSettings;
 
   @Override
   public void onEnable() {
@@ -58,6 +64,7 @@ public final class CraftMaid extends JavaPlugin {
     maidMenuService = new MaidMenuService(this);
     combatBuffService = new MaidCombatBuffService(this);
     perceptionService = new MaidPerceptionService(this);
+    visionService = new MaidVisionService(this);
     if (!maidNpcService.isAvailable()) {
       getLogger().warning("找不到 Citizens 插件或 NPC 服务不可用！(实体功能受限，但不影响聊天测试)");
     }
@@ -112,6 +119,9 @@ public final class CraftMaid extends JavaPlugin {
 
   @Override
   public void onDisable() {
+    if (visionService != null) {
+      visionService.shutdown();
+    }
     if (maidMenuService != null) {
       maidMenuService.closeEquipmentEditor();
     }
@@ -141,6 +151,8 @@ public final class CraftMaid extends JavaPlugin {
 
   public void loadConfiguration() {
     this.config = CraftMaidConfig.load(this);
+    this.visionSettings = VisionSettings.load(getConfig());
+    this.visionAssetSettings = VisionAssetSettings.load(getConfig());
     this.combatPolicy = MaidCombatPolicy.from(config.maid().combat());
     if (anchorService != null) {
       anchorService.load();
@@ -180,6 +192,7 @@ public final class CraftMaid extends JavaPlugin {
   }
 
   public boolean reloadPlugin() {
+    visionService.invalidate();
     conversationHistory.save();
     maidControlService.invalidatePlans();
     maidMenuService.closeEquipmentEditor();
@@ -348,6 +361,18 @@ public final class CraftMaid extends JavaPlugin {
 
   public MaidPerceptionService getPerceptionService() {
     return perceptionService;
+  }
+
+  public VisionSettings getVisionSettings() {
+    return visionSettings;
+  }
+
+  public VisionAssetSettings getVisionAssetSettings() {
+    return visionAssetSettings;
+  }
+
+  public MaidVisionService getVisionService() {
+    return visionService;
   }
 
   public int getConversationSummaryMaxTokens() {
